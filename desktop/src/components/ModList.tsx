@@ -1,0 +1,506 @@
+import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { DndContext, closestCenter, KeyboardSensor, MouseSensor, useSensor, useSensors,
+  DragEndEvent, DragOverlay, DragStartEvent } from "@dnd-kit/core";
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useStore } from "../store";
+import { useT } from "../i18n";
+import { useViewModeStore } from "../viewModeStore";
+import { ViewModeToggle } from "./ViewModeToggle";
+import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw } from "lucide-react";
+import clsx from "clsx";
+import type { Mod } from "../types";
+import ModDetailModal from "./ModDetailModal";
+import ModCategorySelect from "./ModCategorySelect";
+import CategoryFilter from "./CategoryFilter";
+import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
+import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
+import { isModOutdated } from "@core/mod-manager/workshop-update-status";
+
+// ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
+
+interface ModRowProps {
+  mod: Mod;
+  onToggle: (mod: Mod) => void;
+  onShowDetail: (mod: Mod) => void;
+  onShowCompat: (modName: string) => void;
+  onShowDependency: (modName: string) => void;
+  onShowUpdate: (modName: string) => void;
+  dependencyIssueCount: number;
+  hasUpdate: boolean;
+  category: string | null;
+  categories: string[];
+  onCategoryChange: (modName: string, category: string | null) => void;
+  onAddCategory: (name: string) => void;
+}
+
+const ModRow = memo(function ModRow({
+  mod, onToggle, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, dependencyIssueCount,
+  hasUpdate, category, categories, onCategoryChange, onAddCategory,
+}: ModRowProps) {
+  const t = useT();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortDragging } = useSortable({ id: mod.name });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  // 仅订阅本行的覆盖统计，避免其他 mod 统计变化导致重渲染
+  const stats = useStore(s => mod.isEnabled ? s.overwriteStats?.[mod.name] : undefined);
+
+  const displayName = mod.humanName || mod.name.replace(".pack", "");
+  const hasWorkshopName = !!mod.humanName;
+
+  return (
+    <div ref={setNodeRef} style={style}
+      className={clsx("group flex items-center gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-colors cursor-pointer hover:bg-morandi-hover/50",
+        isSortDragging && "opacity-50",
+        mod.isEnabled ? "bg-morandi-card" : "bg-morandi-page/50")}
+      onDoubleClick={() => onShowDetail(mod)}>
+      <div {...attributes} {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none">
+        <GripVertical className="w-4 h-4 text-morandi-text-muted" />
+      </div>
+      <button onClick={(e) => { e.stopPropagation(); onToggle(mod); }}
+        className={clsx("w-5 h-5 rounded border-2 flex items-center justify-center transition-all shrink-0",
+          mod.isEnabled ? "bg-morandi-success border-morandi-success" : "border-morandi-border hover:border-morandi-accent-light")}>
+        {mod.isEnabled && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+      </button>
+      {/* 工坊封面图片 — lazy 加载 */}
+      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+        {mod.imgPath ? (
+          <img
+            src={`file:///${mod.imgPath.replace(/\\/g, '/')}`}
+            className="w-full h-full object-cover"
+            alt={displayName}
+            loading="lazy"
+            draggable={false}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none';
+              (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+            }}
+          />
+        ) : null}
+        <Package className={clsx("w-5 h-5 text-morandi-text-muted", mod.imgPath && "hidden")} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className={clsx(
+          "text-sm truncate",
+          mod.isEnabled ? "text-morandi-text font-medium" : "text-morandi-text-secondary"
+        )}>
+          {displayName}
+        </div>
+        <div className="text-xs text-morandi-text-muted truncate">
+          {mod.author && <span className="text-morandi-accent">{mod.author}</span>}
+          {mod.author && hasWorkshopName && <span> · </span>}
+          {hasWorkshopName && <span className="font-mono text-morandi-text-muted/70">{mod.name.replace(".pack", "")}</span>}
+        </div>
+      </div>
+      {/* 冲突 / 更新 / 依赖：位于种类选择器左侧 */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {hasUpdate && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowUpdate(mod.name); }}
+            className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
+            title={t("modlist.updateTooltip")}
+          >
+            <DownloadCloud className="w-4 h-4" />
+          </button>
+        )}
+        {mod.isEnabled && dependencyIssueCount > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowDependency(mod.name); }}
+            className="p-1 rounded-md text-morandi-warning hover:bg-morandi-warning-light/40 transition-colors"
+            title={t("modlist.dependencyTooltip", { n: dependencyIssueCount })}
+          >
+            <AlertTriangle className="w-4 h-4" />
+          </button>
+        )}
+        {mod.isEnabled && stats && (stats.wins > 0 || stats.losses > 0) && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onShowCompat(mod.name); }}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-morandi-sidebar/60 hover:bg-morandi-hover transition-colors"
+            title={t("modlist.rowOverwriteTooltip", { wins: stats.wins, losses: stats.losses })}
+          >
+            {stats.wins > 0 && (
+              <span className="text-[10px] font-semibold text-morandi-success leading-none">↑{stats.wins}</span>
+            )}
+            {stats.losses > 0 && (
+              <span className="text-[10px] font-semibold text-morandi-danger leading-none">↓{stats.losses}</span>
+            )}
+          </button>
+        )}
+      </div>
+      <ModCategorySelect
+        compact
+        value={category}
+        categories={categories}
+        workshopTags={normalizeWorkshopTags(mod.tags)}
+        onChange={(cat) => onCategoryChange(mod.name, cat)}
+        onAddCategory={onAddCategory}
+      />
+      <button
+        onClick={(e) => { e.stopPropagation(); onShowDetail(mod); }}
+        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+        title={t("modlist.viewDetails")}
+      >
+        <Info className="w-4 h-4 text-morandi-text-muted" />
+      </button>
+    </div>
+  );
+});
+
+// ─── 拖拽预览 ──────────────────────────────────────────────────────────────
+
+function DragOverlayContent({ mod }: { mod: Mod }) {
+  const displayName = mod.humanName || mod.name.replace(".pack", "");
+  return (
+    <div className="drag-overlay flex items-center gap-3 px-4 py-2.5">
+      <GripVertical className="w-4 h-4 text-morandi-accent" />
+      <div className={clsx("w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
+        mod.isEnabled ? "bg-morandi-success border-morandi-success" : "border-morandi-border")}>
+        {mod.isEnabled && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+      </div>
+      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+        {mod.imgPath ? <img src={`file:///${mod.imgPath.replace(/\\/g, '/')}`} className="w-full h-full object-cover" alt="" draggable={false} />
+        : <Package className="w-5 h-5 text-morandi-text-muted" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-morandi-text truncate">{displayName}</div>
+        {mod.author && <div className="text-xs text-morandi-accent truncate">{mod.author}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── 主列表 ────────────────────────────────────────────────────────────────
+
+export default function ModList() {
+  const t = useT();
+  const filter = useStore(s => s.filter);
+  const setFilter = useStore(s => s.setFilter);
+  const setMods = useStore(s => s.setMods);
+  const mods = useStore(s => s.mods);
+  const isScanning = useStore(s => s.isScanning);
+  const markDirty = useStore(s => s.markDirty);
+  const openCompatPanel = useStore(s => s.openCompatPanel);
+  const openDependencyModal = useStore(s => s.openDependencyModal);
+  const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
+  const categories = useStore(s => s.categories);
+  const setCategories = useStore(s => s.setCategories);
+  const categoryFilter = useStore(s => s.categoryFilter);
+  const openUpdateModal = useStore(s => s.openUpdateModal);
+  const isCheckingUpdates = useStore(s => s.isCheckingUpdates);
+  const setIsCheckingUpdates = useStore(s => s.setIsCheckingUpdates);
+  const refreshOverwriteStats = useStore(s => s.refreshOverwriteStats);
+  const currentGame = useStore(s => s.currentGame);
+  const activePresetName = useStore(s => s.activePresetName);
+  // 显示模式（来自独立的持久化 store）
+  const viewMode = useViewModeStore(s => s.current);
+  const loadMode = useViewModeStore(s => s.loadMode);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
+
+  // 切换 game / profile 时自动加载已记忆的显示模式
+  useEffect(() => {
+    if (activePresetName) loadMode(currentGame, activePresetName);
+  }, [currentGame, activePresetName, loadMode]);
+
+  const filteredMods = useMemo(() => {
+    // 第一步：按显示模式过滤（启用/禁用/全部）
+    let result = mods;
+    if (viewMode === "enabled") result = mods.filter(m => m.isEnabled);
+    else if (viewMode === "disabled") result = mods.filter(m => !m.isEnabled);
+    // 按分类筛选
+    if (categoryFilter) {
+      result = result.filter(m => getModCategory(m) === categoryFilter);
+    }
+    // 按搜索文本过滤
+    if (!filter) return result;
+    const l = filter.toLowerCase();
+    return result.filter(m => {
+      const name = m.name?.toLowerCase() || "";
+      const humanName = m.humanName?.toLowerCase() || "";
+      const workshopId = m.workshopId || "";
+      return name.includes(l) || humanName.includes(l) || workshopId.includes(l);
+    });
+  }, [mods, filter, viewMode, categoryFilter]);
+
+  const outdatedCount = useMemo(
+    () => mods.filter(isModOutdated).length,
+    [mods],
+  );
+
+  const outdatedByName = useMemo(() => {
+    const map: Record<string, boolean> = {};
+    for (const mod of mods) {
+      if (isModOutdated(mod)) map[mod.name] = true;
+    }
+    return map;
+  }, [mods]);
+
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const activeMod = useMemo(() => activeId ? mods.find(m => m.name === activeId) ?? null : null, [activeId, mods]);
+
+  // 稳定的回调，避免 memo 化的 ModRow 因 props 变化而重渲染
+  const handleToggle = useCallback(async (mod: Mod) => {
+    try {
+      const result = await window.api.toggleMod(mod.name);
+      if (Array.isArray(result)) {
+        setMods(result);
+        markDirty();
+      }
+    } catch (e) {
+      console.error("Failed to toggle mod:", e);
+    }
+  }, [setMods, markDirty]);
+
+  const handleShowDetail = useCallback((mod: Mod) => {
+    setSelectedMod(mod);
+  }, []);
+
+  // 点击某 mod 的覆盖徽标 → 打开面板并聚焦该 mod
+  const handleShowCompat = useCallback((modName: string) => {
+    openCompatPanel(modName);
+  }, [openCompatPanel]);
+
+  const handleShowDependency = useCallback((modName: string) => {
+    openDependencyModal(modName);
+  }, [openDependencyModal]);
+
+  const handleShowUpdate = useCallback((modName: string) => {
+    openUpdateModal(modName);
+  }, [openUpdateModal]);
+
+  const handleCheckUpdates = useCallback(async () => {
+    setIsCheckingUpdates(true);
+    try {
+      const result = await window.api.checkModUpdates(true);
+      setMods(result.mods);
+    } catch (e) {
+      console.error("Failed to check updates:", e);
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  }, [setMods, setIsCheckingUpdates]);
+
+  const handleUpdateAll = useCallback(async () => {
+    if (outdatedCount === 0) return;
+    if (!window.confirm(t("update.updateAllConfirm", { n: outdatedCount }))) return;
+    setIsCheckingUpdates(true);
+    try {
+      const result = await window.api.forceUpdateAllOutdated();
+      setMods(result.mods);
+    } catch (e) {
+      console.error("Failed to update all:", e);
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  }, [outdatedCount, setMods, setIsCheckingUpdates, t]);
+
+  const handleCategoryChange = useCallback(async (modName: string, category: string | null) => {
+    try {
+      const result = await window.api.setModCategory(modName, category);
+      setMods(result.mods);
+      setCategories(result.categories);
+      setSelectedMod(prev => prev?.name === modName
+        ? result.mods.find(m => m.name === modName) ?? prev
+        : prev);
+      markDirty();
+    } catch (e) {
+      console.error("Failed to set mod category:", e);
+    }
+  }, [setMods, setCategories, markDirty]);
+
+  const handleAddCategory = useCallback(async (name: string) => {
+    try {
+      const list = await window.api.addCustomCategory(name);
+      setCategories(list);
+    } catch (e) {
+      console.error("Failed to add category:", e);
+    }
+  }, [setCategories]);
+
+  const dependencyIssueCounts = useMemo(() => {
+    const ctx = { mods, subscribedWorkshopIds: new Set(subscribedWorkshopIds) };
+    const counts: Record<string, number> = {};
+    for (const mod of mods) {
+      if (!mod.isEnabled) continue;
+      const n = getModDependencyIssues(mod, ctx).length;
+      if (n > 0) counts[mod.name] = n;
+    }
+    return counts;
+  }, [mods, subscribedWorkshopIds]);
+
+  const handleEnableAll = useCallback(async () => {
+    try {
+      const result = await window.api.enableAll();
+      if (Array.isArray(result)) { setMods(result); markDirty(); }
+    } catch (e) { console.error("Failed to enable all:", e); }
+  }, [setMods, markDirty]);
+
+  const handleDisableAll = useCallback(async () => {
+    try {
+      const result = await window.api.disableAll();
+      if (Array.isArray(result)) { setMods(result); markDirty(); }
+    } catch (e) { console.error("Failed to disable all:", e); }
+  }, [setMods, markDirty]);
+
+  const handleReset = useCallback(async () => {
+    try {
+      const result = await window.api.resetLoadOrder();
+      if (Array.isArray(result)) setMods(result);
+    } catch (e) { console.error("Failed to reset load order:", e); }
+  }, [setMods]);
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    setActiveId(e.active.id as string);
+  }, []);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    setActiveId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const fullOldIndex = mods.findIndex(m => m.name === active.id);
+    const fullNewIndex = mods.findIndex(m => m.name === over.id);
+    if (fullOldIndex === -1 || fullNewIndex === -1) return;
+    const ordered = [...mods];
+    const [moved] = ordered.splice(fullOldIndex, 1);
+    ordered.splice(fullNewIndex, 0, moved);
+    try {
+      const result = await window.api.applyDragOrder(ordered.map(m => m.name));
+      if (Array.isArray(result)) {
+        setMods(result);
+        markDirty();
+      }
+    } catch (e) {
+      console.error("Failed to apply drag order:", e);
+    }
+  }, [mods, setMods, markDirty]);
+
+  // ── 实时刷新覆盖统计 ──
+  // 当启用的 mod 集合或其加载顺序变化时，防抖刷新后端覆盖统计。
+  // 签名包含所有启用 mod 的 name+loadOrder，勾选/取消/拖动都会改变它。
+  const enabledSignature = useMemo(
+    () => mods.filter(m => m.isEnabled).map(m => `${m.name}:${m.loadOrder ?? 0}`).join("|"),
+    [mods],
+  );
+  useEffect(() => {
+    if (!enabledSignature) return;
+    const handle = setTimeout(() => { refreshOverwriteStats(); }, 250);
+    return () => clearTimeout(handle);
+  }, [enabledSignature, refreshOverwriteStats]);
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="px-4 py-3 border-b border-morandi-border-light bg-morandi-card flex items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-morandi-text-muted" />
+          <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
+            placeholder={t("modlist.filterPlaceholder")} className="input-morandi !pl-9 !py-1.5" />
+        </div>
+        {/* 显示模式切换器（per-profile 自动记忆） */}
+        <ViewModeToggle />
+        <CategoryFilter />
+        <button
+          onClick={handleCheckUpdates}
+          disabled={isCheckingUpdates || isScanning}
+          className="btn-morandi-ghost text-xs flex items-center gap-1 relative"
+          title={t("update.checkUpdates")}
+        >
+          <RefreshCw className={clsx("w-3.5 h-3.5", isCheckingUpdates && "animate-spin")} />
+          {t("update.checkUpdates")}
+          {outdatedCount > 0 && (
+            <span className="ml-1 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-morandi-accent text-white text-[10px] font-semibold inline-flex items-center justify-center">
+              {outdatedCount}
+            </span>
+          )}
+        </button>
+        {outdatedCount > 0 && (
+          <button
+            onClick={handleUpdateAll}
+            disabled={isCheckingUpdates || isScanning}
+            className="btn-morandi-ghost text-xs flex items-center gap-1 text-morandi-accent"
+            title={t("update.updateAll")}
+          >
+            <DownloadCloud className="w-3.5 h-3.5" />
+            {t("update.updateAll")}
+          </button>
+        )}
+        <div className="flex items-center gap-1">
+          <button onClick={handleEnableAll} className="btn-morandi-ghost text-xs">
+            <ToggleRight className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOn")}</button>
+          <button onClick={handleDisableAll} className="btn-morandi-ghost text-xs">
+            <ToggleLeft className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOff")}</button>
+          <button onClick={handleReset} className="btn-morandi-ghost text-xs">
+            <RotateCcw className="w-3.5 h-3.5 inline mr-1" />{t("modlist.reset")}</button>
+        </div>
+        <div className="text-xs text-morandi-text-muted ml-auto shrink-0">
+          {isScanning ? (
+            <span className="text-morandi-accent">{t("common.loading")}</span>
+          ) : (
+            <button
+              type="button"
+              className="p-1 rounded-md text-morandi-accent/80 hover:bg-morandi-hover transition-colors"
+              title={t("modlist.loadOrderHint")}
+              aria-label={t("modlist.loadOrderHint")}
+            >
+              <ArrowDown className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {isScanning ? (
+          <div className="flex items-center justify-center h-full text-morandi-text-muted">
+            <div className="text-center">
+              <div className="w-8 h-8 border-2 border-morandi-accent-light border-t-morandi-accent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm">{t("modlist.scanning")}</p>
+            </div>
+          </div>
+        ) : filteredMods.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-morandi-text-muted">
+            <p className="text-sm">{filter || categoryFilter ? t("modlist.noMatch") : t("modlist.noMods")}</p>
+          </div>
+        ) : (
+          <DndContext sensors={sensors} collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}>
+            <SortableContext items={filteredMods.map(m => m.name)} strategy={verticalListSortingStrategy}>
+              {filteredMods.map(mod => (
+                <ModRow
+                  key={mod.name}
+                  mod={mod}
+                  onToggle={handleToggle}
+                  onShowDetail={handleShowDetail}
+                  onShowCompat={handleShowCompat}
+                  onShowDependency={handleShowDependency}
+                  onShowUpdate={handleShowUpdate}
+                  dependencyIssueCount={dependencyIssueCounts[mod.name] ?? 0}
+                  hasUpdate={!!outdatedByName[mod.name]}
+                  category={getModCategory(mod)}
+                  categories={categories}
+                  onCategoryChange={handleCategoryChange}
+                  onAddCategory={handleAddCategory}
+                />
+              ))}
+            </SortableContext>
+            <DragOverlay>{activeMod ? <DragOverlayContent mod={activeMod} /> : null}</DragOverlay>
+          </DndContext>
+        )}
+      </div>
+
+      {/* Mod 详情弹窗 */}
+      {selectedMod && (
+        <ModDetailModal
+          mod={selectedMod}
+          onClose={() => setSelectedMod(null)}
+          categories={categories}
+          onCategoryChange={handleCategoryChange}
+          onAddCategory={handleAddCategory}
+          onShowUpdate={handleShowUpdate}
+        />
+      )}
+    </div>
+  );
+}

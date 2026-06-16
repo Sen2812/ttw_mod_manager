@@ -1,0 +1,764 @@
+/**
+ * Mod Discovery
+ *
+ * Scans game directories to find installed mods.
+ * Works with real filesystem using Node.js fs.
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+import * as https from "https";
+import { GameDefinition, GameFolderPaths, Mod } from "../types";
+import { readPackHeader, NodeBinaryReader } from "../pack-file";
+import { fetchWorkshopRequiredIds, sleep } from "./workshop-dependencies";
+import {
+  WorkshopCache,
+  type WorkshopItemData,
+  type WorkshopFetchMode,
+} from "./workshop-cache";
+import { normalizeWorkshopTags } from "./category-utils";
+import { applyWorkshopTimeUpdatedToMods } from "./workshop-update-status";
+
+export type { WorkshopItemData, WorkshopFetchMode };
+export { WorkshopCache, METADATA_TTL_MS, REQUIRED_IDS_TTL_MS } from "./workshop-cache";
+
+export type LogCallback = (msg: string) => void;
+
+/** Delay between Steam Web API batches to avoid burst traffic. */
+const API_BATCH_DELAY_MS = 1200;
+/** Delay between workshop HTML prerequisite fetches. */
+const REQUIRED_FETCH_DELAY_MS = 1500;
+
+// ─── Steam Workshop API ──────────────────────────────────────────────────────
+
+/**
+ * Fetch mod metadata from Steam Web API in batches.
+ * Uses ISteamRemoteStorage/GetPublishedFileDetails endpoint.
+ * Caller should only pass IDs not already present in the local cache.
+ */
+export async function fetchWorkshopMetadata(
+  workshopIds: string[],
+  log?: LogCallback,
+): Promise<Map<string, WorkshopItemData>> {
+  const result = new Map<string, WorkshopItemData>();
+
+  if (workshopIds.length === 0) return result;
+
+  log?.(`Steam API: fetching metadata for ${workshopIds.length} Workshop item(s)...`);
+
+  const batchSize = 50;
+  for (let i = 0; i < workshopIds.length; i += batchSize) {
+    if (i > 0) await sleep(API_BATCH_DELAY_MS);
+    const batch = workshopIds.slice(i, i + batchSize);
+
+    try {
+      const formData = new URLSearchParams();
+      formData.append("itemcount", batch.length.toString());
+      batch.forEach((id, idx) => {
+        formData.append(`publishedfileids[${idx}]`, id);
+      });
+
+      const data = await new Promise<WorkshopItemData[]>((resolve, reject) => {
+        const postData = formData.toString();
+        const options = {
+          hostname: "api.steampowered.com",
+          path: "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": Buffer.byteLength(postData),
+          },
+        };
+
+        const req = https.request(options, (res) => {
+          let body = "";
+          res.on("data", (chunk) => { body += chunk; });
+          res.on("end", () => {
+            try {
+              const parsed = JSON.parse(body);
+              resolve(parsed?.response?.publishedfiledetails || []);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+
+        req.on("error", reject);
+        req.write(postData);
+        req.end();
+      });
+
+      for (const item of data) {
+        if (!item.publishedfileid) continue;
+        const raw = item as WorkshopItemData & { time_updated?: number | string };
+        const timeUpdated = raw.time_updated != null
+          ? Number(raw.time_updated) * 1000
+          : undefined;
+        if (!item.title && timeUpdated === undefined) continue;
+        result.set(item.publishedfileid, {
+          publishedfileid: item.publishedfileid,
+          title: item.title,
+          tags: item.tags,
+          creator: item.creator,
+          timeUpdated,
+        });
+      }
+
+      log?.(`  Steam API batch ${Math.floor(i / batchSize) + 1} done`);
+    } catch (e) {
+      log?.(`  Steam API batch error: ${e}`);
+    }
+  }
+
+  log?.(`Steam API: received metadata for ${result.size} item(s)`);
+  return result;
+}
+
+/** Seed cache from locally available mod info to avoid API calls. */
+function seedCacheFromLocalMods(mods: Mod[], cache: WorkshopCache): void {
+  const seeds: [string, Partial<WorkshopItemData>][] = [];
+  for (const mod of mods) {
+    if (!mod.workshopId || mod.isInData || cache.has(mod.workshopId)) continue;
+    if (!mod.humanName && !mod.author) continue;
+    seeds.push([mod.workshopId, { title: mod.humanName || undefined, creator: mod.author || undefined }]);
+  }
+  if (seeds.length > 0) cache.mergeMetadata(seeds);
+}
+
+/**
+ * Load cache and fetch metadata only for IDs that are genuinely missing.
+ * Pass `existing` to reuse an in-memory cache (avoids redundant disk I/O).
+ */
+export async function getWorkshopMetadata(
+  workshopIds: string[],
+  cacheDir: string,
+  log?: LogCallback,
+  mode: WorkshopFetchMode = "routine",
+  existing?: WorkshopCache,
+): Promise<Map<string, WorkshopItemData>> {
+  const cache = existing ?? new WorkshopCache(cacheDir).load();
+  const needsFetch = cache.idsNeedingMetadata(workshopIds, mode);
+
+  if (needsFetch.length === 0) {
+    if (workshopIds.length > 0) {
+      log?.(`Workshop metadata: ${workshopIds.length} item(s) served from cache (no API calls)`);
+    }
+    return cache.asMap();
+  }
+
+  log?.(
+    `Workshop metadata: ${needsFetch.length} new/stale, `
+    + `${workshopIds.length - needsFetch.length} from cache`,
+  );
+  const fetched = await fetchWorkshopMetadata(needsFetch, log);
+  cache.mergeMetadata(fetched);
+  cache.save();
+  return cache.asMap();
+}
+
+/**
+ * Refresh workshop `time_updated` for mods and apply to mod.lastChanged.
+ * Uses cache TTL unless `force` is true (manual check).
+ */
+export async function checkWorkshopUpdates(
+  mods: Mod[],
+  cacheDir: string,
+  log?: LogCallback,
+  force = false,
+  existing?: WorkshopCache,
+): Promise<void> {
+  const workshopIds = [...new Set(
+    mods.filter(m => m.workshopId && !m.isInData).map(m => m.workshopId),
+  )];
+  if (workshopIds.length === 0) return;
+
+  const cache = existing ?? new WorkshopCache(cacheDir).load();
+  const needsFetch = force ? workshopIds : cache.idsNeedingUpdateCheck(workshopIds);
+
+  if (needsFetch.length === 0) {
+    applyWorkshopTimeUpdatedToMods(mods, cache.asMap());
+    log?.(`Workshop update check: ${workshopIds.length} item(s) from cache`);
+    return;
+  }
+
+  log?.(
+    `Workshop update check: fetching ${needsFetch.length} item(s) `
+    + `(${workshopIds.length - needsFetch.length} cached)`,
+  );
+  const fetched = await fetchWorkshopMetadata(needsFetch, log);
+  cache.mergeUpdateTimes(
+    [...fetched.entries()].map(([id, data]) => [id, { timeUpdated: data.timeUpdated }]),
+  );
+  cache.save();
+  applyWorkshopTimeUpdatedToMods(mods, cache.asMap());
+  log?.("Workshop update check complete");
+}
+
+/** Fetch prerequisite IDs only for items not yet in cache. Sequential with delay. */
+async function ensureWorkshopRequiredIds(
+  ids: string[],
+  cache: WorkshopCache,
+  log?: LogCallback,
+  mode: WorkshopFetchMode = "routine",
+): Promise<void> {
+  const needsFetch = cache.idsNeedingRequiredIds(ids, mode);
+  if (needsFetch.length === 0) return;
+
+  log?.(
+    `Workshop prerequisites: fetching ${needsFetch.length} item(s) `
+    + `(${ids.length - needsFetch.length} cached)`,
+  );
+
+  for (let i = 0; i < needsFetch.length; i++) {
+    if (i > 0) await sleep(REQUIRED_FETCH_DELAY_MS);
+    const id = needsFetch[i];
+    try {
+      const requiredIds = await fetchWorkshopRequiredIds(id);
+      cache.setRequiredIds(id, requiredIds);
+    } catch (e) {
+      log?.(`  Failed to fetch prerequisites for ${id}: ${e}`);
+      cache.setRequiredIds(id, []);
+    }
+  }
+
+  cache.save();
+  log?.("Workshop prerequisites cached");
+}
+
+/** Resolve prerequisite titles and apply reqModIds to mods. */
+async function applyWorkshopDependencies(
+  mods: Mod[],
+  cache: WorkshopCache,
+  cacheDir: string,
+  log?: LogCallback,
+  mode: WorkshopFetchMode = "routine",
+): Promise<void> {
+  const workshopModIds = [...new Set(
+    mods.filter(m => m.workshopId && !m.isInData).map(m => m.workshopId),
+  )];
+
+  await ensureWorkshopRequiredIds(workshopModIds, cache, log, mode);
+
+  const allRequired = new Set<string>();
+  for (const id of workshopModIds) {
+    for (const req of cache.get(id)?.requiredIds ?? []) {
+      allRequired.add(req);
+    }
+  }
+  const missingTitles = [...allRequired].filter(
+    id => !cache.has(id) || !cache.get(id)!.title,
+  );
+  if (missingTitles.length > 0) {
+    await getWorkshopMetadata(missingTitles, cacheDir, log, mode, cache);
+  }
+
+  const data = cache.asMap();
+  for (const mod of mods) {
+    if (!mod.workshopId || mod.isInData) continue;
+    const requiredIds = data.get(mod.workshopId)?.requiredIds ?? [];
+    if (requiredIds.length === 0) continue;
+    mod.reqModIds = requiredIds;
+    mod.reqModIdToName = requiredIds.map(id => [
+      id,
+      data.get(id)?.title ?? id,
+    ]);
+  }
+}
+
+// ─── Steam Path Discovery ────────────────────────────────────────────────────
+
+import { execSync } from "child_process";
+
+/**
+ * Find Steam installation path on Windows from registry.
+ * Falls back to common locations on Linux/Mac.
+ */
+export async function findSteamPath(): Promise<string | undefined> {
+  if (process.platform === "win32") {
+    try {
+      const result = execSync(
+        'reg query "HKLM\\SOFTWARE\\Wow6432Node\\Valve\\Steam" /v InstallPath',
+        { encoding: "utf8", timeout: 5000 },
+      );
+      const match = result.match(/InstallPath\s+REG_SZ\s+(.+)/);
+      if (match) return match[1].trim();
+    } catch {
+      // Registry read failed, try common paths
+      const commonPaths = [
+        "C:\\Program Files (x86)\\Steam",
+        "C:\\Program Files\\Steam",
+        "D:\\Steam",
+        "D:\\SteamLibrary",
+      ];
+      for (const p of commonPaths) {
+        if (fs.existsSync(p)) return p;
+      }
+    }
+  } else if (process.platform === "linux") {
+    const home = process.env.HOME || "";
+    const steamPath = path.join(home, ".steam", "steam");
+    if (fs.existsSync(steamPath)) return steamPath;
+  } else if (process.platform === "darwin") {
+    const home = process.env.HOME || "";
+    const steamPath = path.join(home, "Library/Application Support/Steam");
+    if (fs.existsSync(steamPath)) return steamPath;
+  }
+  return undefined;
+}
+
+/**
+ * Parse Steam's libraryfolders.vdf to find all Steam library paths.
+ */
+export async function findSteamLibraryFolders(steamPath: string): Promise<string[]> {
+  const vdfPath = path.join(steamPath, "steamapps", "libraryfolders.vdf");
+  if (!fs.existsSync(vdfPath)) return [steamPath];
+
+  const content = fs.readFileSync(vdfPath, "utf8");
+  const paths: string[] = [steamPath];
+
+  // Simple VDF parser — extract "path" values
+  const pathMatch = content.matchAll(/"path"\s+"([^"]+)"/g);
+  for (const match of pathMatch) {
+    const libPath = match[1].replace(/\\\\/g, "\\").replace(/\/\//g, "/");
+    if (!paths.includes(libPath)) paths.push(libPath);
+  }
+
+  return paths;
+}
+
+/**
+ * Find the steamapps folder for a specific game by its Steam App ID.
+ */
+export async function findGameSteamAppsFolder(
+  steamId: string,
+  log?: LogCallback,
+): Promise<string | undefined> {
+  const steamPath = await findSteamPath();
+  if (!steamPath) {
+    log?.("Steam installation not found");
+    return undefined;
+  }
+
+  const libraryFolders = await findSteamLibraryFolders(steamPath);
+
+  for (const libPath of libraryFolders) {
+    const manifestPath = path.join(
+      libPath,
+      "steamapps",
+      `appmanifest_${steamId}.acf`,
+    );
+    if (fs.existsSync(manifestPath)) {
+      const steamAppsPath = path.join(libPath, "steamapps");
+      log?.(`Found game at: ${steamAppsPath}`);
+      return steamAppsPath;
+    }
+  }
+
+  log?.(`Game with Steam ID ${steamId} not found in any library`);
+  return undefined;
+}
+
+/**
+ * Resolve all folder paths for a game.
+ */
+export async function resolveGameFolderPaths(
+  game: GameDefinition,
+  log?: LogCallback,
+): Promise<GameFolderPaths> {
+  const steamAppsFolder = await findGameSteamAppsFolder(game.steamId, log);
+  if (!steamAppsFolder) {
+    return { gamePath: undefined, contentFolder: undefined, dataFolder: undefined };
+  }
+
+  const gamePath = path.join(steamAppsFolder, "common", game.gameFolder);
+  const contentFolder = path.join(steamAppsFolder, "workshop", "content", game.steamId);
+  const dataFolder = path.join(gamePath, "data");
+
+  log?.(`Game path: ${gamePath}`);
+  log?.(`Content folder: ${contentFolder}`);
+  log?.(`Data folder: ${dataFolder}`);
+
+  return { gamePath, contentFolder, dataFolder };
+}
+
+// ─── Vanilla Pack Detection ──────────────────────────────────────────────────
+
+/**
+ * Read manifest.txt to get list of vanilla pack names.
+ */
+export function readManifest(gamePath: string): string[] {
+  const manifestPath = path.join(gamePath, "data", "manifest.txt");
+  if (!fs.existsSync(manifestPath)) return [];
+
+  const content = fs.readFileSync(manifestPath, "utf8");
+  const packs: string[] = [];
+  const re = /([^\s]+)/;
+
+  for (const line of content.split("\n")) {
+    const match = line.match(re);
+    if (match) packs.push(match[1]);
+  }
+
+  return packs.filter((name) => name.endsWith(".pack"));
+}
+
+/**
+ * Get vanilla pack names for a game (from manifest or game definition).
+ */
+export function getVanillaPackNames(
+  game: GameDefinition,
+  gamePath?: string,
+): Set<string> {
+  const packs: string[] = [];
+
+  if (gamePath) {
+    packs.push(...readManifest(gamePath));
+  }
+
+  // Fallback to game definition manifest
+  if (packs.length === 0 && game.manifest) {
+    packs.push(...game.manifest);
+  }
+
+  // Game-specific extras
+  if (game.id === "attila" && !packs.includes("charlemagne.pack")) {
+    packs.push("charlemagne.pack");
+  }
+  if (game.id === "rome2") {
+    for (const extra of ["gaul.pack", "blood_rome2.pack", "punic.pack"]) {
+      if (!packs.includes(extra)) packs.push(extra);
+    }
+  }
+
+  return new Set(packs.filter((name) => name.endsWith(".pack")));
+}
+
+// ─── Mod Building ────────────────────────────────────────────────────────────
+
+/**
+ * Build a Mod from a pack file in the data/ folder.
+ */
+export async function buildDataMod(
+  filePath: string,
+  dataPath: string,
+  isInModding = false,
+): Promise<Mod> {
+  const fileName = path.basename(filePath);
+  let lastChangedLocal: number | undefined;
+  let size: number | undefined;
+  let isSymbolicLink = false;
+
+  try {
+    const stats = fs.lstatSync(filePath);
+    lastChangedLocal = stats.mtimeMs;
+    size = stats.size;
+    isSymbolicLink = stats.isSymbolicLink();
+  } catch (e) {
+    // File might have been deleted or inaccessible
+    console.warn(`Failed to stat file ${filePath}:`, e);
+  }
+
+  // Check for thumbnail
+  let imgPath = "";
+  for (const ext of [".png", ".jpg"]) {
+    const thumbPath = path.join(dataPath, fileName.replace(/\.pack$/, ext));
+    if (fs.existsSync(thumbPath)) {
+      imgPath = thumbPath;
+      break;
+    }
+  }
+
+  // Read pack header for movie flag and dependencies
+  let isMovie = false;
+  let dependencyPacks: string[] = [];
+  try {
+    const header = await readPackHeader(filePath, (p) => new NodeBinaryReader(p));
+    isMovie = header.isMovie;
+    dependencyPacks = header.dependencyPacks;
+  } catch {
+    // Header read failed, leave defaults
+  }
+
+  return {
+    humanName: "",
+    name: fileName,
+    path: filePath,
+    modDirectory: path.dirname(filePath),
+    imgPath,
+    workshopId: fileName,
+    isEnabled: false,
+    isInData: true,
+    isInModding,
+    isSymbolicLink,
+    loadOrder: undefined,
+    lastChangedLocal,
+    author: "",
+    isDeleted: false,
+    isMovie,
+    size,
+    dependencyPacks,
+    tags: ["mod"],
+  };
+}
+
+/**
+ * Read Workshop metadata from content subfolder.
+ * Looks for workshop.json or similar metadata files.
+ */
+function readWorkshopMetadata(subfolderPath: string): { humanName?: string; author?: string; tags?: string[] } {
+  const result: { humanName?: string; author?: string; tags?: string[] } = {};
+  
+  // Try to read workshop.json
+  const workshopJsonPath = path.join(subfolderPath, "workshop.json");
+  if (fs.existsSync(workshopJsonPath)) {
+    try {
+      const content = fs.readFileSync(workshopJsonPath, "utf8");
+      const data = JSON.parse(content);
+      if (data.title) result.humanName = data.title;
+      if (data.creator) result.author = data.creator;
+      if (data.tags) result.tags = data.tags;
+    } catch {
+      // Failed to parse workshop.json
+    }
+  }
+  
+  // Try to read __folder_managed_by_vortex.json (Vortex mod manager)
+  const vortexJsonPath = path.join(subfolderPath, "__folder_managed_by_vortex.json");
+  if (fs.existsSync(vortexJsonPath)) {
+    try {
+      const content = fs.readFileSync(vortexJsonPath, "utf8");
+      const data = JSON.parse(content);
+      if (data.name) result.humanName = data.name;
+    } catch {
+      // Failed to parse vortex json
+    }
+  }
+  
+  // Try to read mod.txt (some mods include this)
+  const modTxtPath = path.join(subfolderPath, "mod.txt");
+  if (fs.existsSync(modTxtPath) && !result.humanName) {
+    try {
+      const content = fs.readFileSync(modTxtPath, "utf8");
+      const lines = content.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("name:")) {
+          result.humanName = line.substring(5).trim();
+          break;
+        }
+      }
+    } catch {
+      // Failed to read mod.txt
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Build a Mod from a Workshop content subfolder.
+ */
+export async function buildContentMod(
+  contentFolder: string,
+  subfolderName: string,
+): Promise<Mod | undefined> {
+  const subfolderPath = path.join(contentFolder, subfolderName);
+  if (!fs.existsSync(subfolderPath)) return undefined;
+
+  const files = fs.readdirSync(subfolderPath, { withFileTypes: true });
+  const packFile = files.find((f) => f.name.endsWith(".pack"));
+  if (!packFile) return undefined;
+
+  const packPath = path.join(subfolderPath, packFile.name);
+  const imgFile = files.find((f) => f.name.endsWith(".png") || f.name.endsWith(".jpg"));
+  const imgPath = imgFile ? path.join(subfolderPath, imgFile.name) : "";
+
+  let lastChangedLocal: number | undefined;
+  let size: number | undefined;
+  let subbedTime: number | undefined;
+  let isSymbolicLink = false;
+
+  try {
+    const stats = fs.lstatSync(packPath);
+    lastChangedLocal = stats.mtimeMs;
+    size = stats.size;
+    isSymbolicLink = stats.isSymbolicLink();
+  } catch {
+    // stat failed
+  }
+
+  try {
+    const stats = fs.statSync(subfolderPath);
+    subbedTime = stats.birthtimeMs;
+  } catch {
+    // stat failed
+  }
+
+  // Read Workshop metadata
+  const metadata = readWorkshopMetadata(subfolderPath);
+
+  // Read pack header
+  let isMovie = false;
+  let dependencyPacks: string[] = [];
+  try {
+    const header = await readPackHeader(packPath, (p) => new NodeBinaryReader(p));
+    isMovie = header.isMovie;
+    dependencyPacks = header.dependencyPacks;
+  } catch {
+    // Header read failed
+  }
+
+  return {
+    humanName: metadata.humanName || "",
+    name: packFile.name,
+    path: packPath,
+    modDirectory: subfolderPath,
+    imgPath,
+    workshopId: subfolderName,
+    isEnabled: false,
+    isInData: false,
+    isSymbolicLink,
+    loadOrder: undefined,
+    lastChangedLocal,
+    isDeleted: false,
+    isMovie,
+    size,
+    subbedTime: subbedTime ?? lastChangedLocal,
+    dependencyPacks,
+    author: metadata.author || "",
+    tags: metadata.tags || ["mod"],
+  };
+}
+
+// ─── Full Mod Scan ───────────────────────────────────────────────────────────
+
+export interface ScanResult {
+  mods: Mod[];
+  vanillaPacks: Set<string>;
+  /** Workshop folder names found under the content directory (subscribed items). */
+  subscribedWorkshopIds: string[];
+}
+
+/**
+ * Scan all mod sources for a game and return the complete mod list.
+ */
+export async function scanMods(
+  game: GameDefinition,
+  folderPaths: GameFolderPaths,
+  cacheDir?: string,
+  log?: LogCallback,
+): Promise<ScanResult> {
+  const mods: Mod[] = [];
+
+  if (!folderPaths.gamePath) {
+    log?.("Game path not set, cannot scan mods");
+    return { mods, vanillaPacks: new Set(), subscribedWorkshopIds: [] };
+  }
+
+  // Get vanilla pack names
+  const vanillaPacks = getVanillaPackNames(game, folderPaths.gamePath);
+  log?.(`Found ${vanillaPacks.size} vanilla packs`);
+
+  // Scan data/modding/ folder
+  const moddingPath = path.join(folderPaths.gamePath, "data", "modding");
+  if (fs.existsSync(moddingPath)) {
+    log?.("Scanning data/modding/ folder...");
+    const files = fs.readdirSync(moddingPath);
+    for (const file of files) {
+      if (!file.endsWith(".pack")) continue;
+      const filePath = path.join(moddingPath, file);
+      try {
+        const mod = await buildDataMod(filePath, path.join(folderPaths.gamePath, "data"), true);
+        mods.push(mod);
+      } catch (e) {
+        log?.(`  Error reading mod ${file}: ${e}`);
+      }
+    }
+    log?.(`  Found ${mods.length} mods in data/modding/`);
+  }
+
+  // Scan data/ folder
+  const dataPath = path.join(folderPaths.gamePath, "data");
+  if (fs.existsSync(dataPath)) {
+    log?.("Scanning data/ folder...");
+    const dataModCount = mods.length;
+    const files = fs.readdirSync(dataPath);
+    for (const file of files) {
+      if (!file.endsWith(".pack")) continue;
+      if (vanillaPacks.has(file)) continue; // Skip vanilla packs
+      const filePath = path.join(dataPath, file);
+      try {
+        const mod = await buildDataMod(filePath, dataPath, false);
+        // Skip if already found in modding/
+        if (mods.some((m) => m.name === mod.name && m.isInModding)) continue;
+        mods.push(mod);
+      } catch (e) {
+        log?.(`  Error reading mod ${file}: ${e}`);
+      }
+    }
+    log?.(`  Found ${mods.length - dataModCount} mods in data/`);
+  }
+
+  // Scan Workshop content folder
+  const workshopIds: string[] = [];
+  if (folderPaths.contentFolder && fs.existsSync(folderPaths.contentFolder)) {
+    log?.("Scanning Workshop content folder...");
+    const contentModCount = mods.length;
+    const entries = fs.readdirSync(folderPaths.contentFolder, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      workshopIds.push(entry.name);
+      try {
+        const mod = await buildContentMod(folderPaths.contentFolder, entry.name);
+        if (mod) {
+          // Check if same pack exists in data/ (prefer data version)
+          const duplicateInData = mods.find((m) => m.name === mod.name && m.isInData);
+          if (duplicateInData) {
+            // Link thumbnail from content to data mod
+            if (!duplicateInData.imgPath && mod.imgPath) {
+              duplicateInData.imgPath = mod.imgPath;
+            }
+            continue;
+          }
+          mods.push(mod);
+        }
+      } catch (e) {
+        log?.(`  Error reading Workshop mod ${entry.name}: ${e}`);
+      }
+    }
+    log?.(`  Found ${mods.length - contentModCount} mods in Workshop content/`);
+  } else {
+    log?.("Workshop content folder not found (may be a non-Steam install)");
+  }
+
+  // Workshop metadata & prerequisites — cache-first, network only when missing.
+  if (workshopIds.length > 0 && cacheDir) {
+    try {
+      const cache = new WorkshopCache(cacheDir).load();
+      seedCacheFromLocalMods(mods, cache);
+      cache.save();
+
+      const workshopData = await getWorkshopMetadata(workshopIds, cacheDir, log, "routine", cache);
+
+      for (const mod of mods) {
+        if (mod.workshopId && workshopData.has(mod.workshopId)) {
+          const data = workshopData.get(mod.workshopId)!;
+          if (!mod.humanName && data.title) mod.humanName = data.title;
+          if (!mod.author && data.creator) mod.author = data.creator;
+          if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+        }
+      }
+
+      applyWorkshopTimeUpdatedToMods(mods, workshopData);
+      await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
+
+      await applyWorkshopDependencies(mods, cache, cacheDir, log);
+
+      log?.("Workshop cache applied");
+    } catch (e) {
+      log?.(`Error loading Workshop cache: ${e}`);
+    }
+  }
+
+  log?.(`Total: ${mods.length} mods found`);
+  return { mods, vanillaPacks, subscribedWorkshopIds: workshopIds };
+}

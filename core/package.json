@@ -1,0 +1,25 @@
+{
+  "name": "mod-manager-core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic core library and CLI for Total War mod management",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "mod-manager": "dist/cli.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "cli": "npx ts-node src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": ["mod-manager", "total-war", "warhammer", "pack-file", "cli"],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "ts-node": "^10.9.2",
+    "@types/node": "^20.0.0"
+  }
+}
