@@ -23,7 +23,7 @@ This project was built entirely with **Cursor**. If you run into any issues, fee
 
 ## Requirements
 
-- **Node.js** 18+ and npm
+- **Node.js** 24+ and npm
 - **Steam** with at least one supported Total War title installed
 - **Windows** (primary target; Linux launch path exists in core)
 

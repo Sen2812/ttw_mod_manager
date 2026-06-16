@@ -17,6 +17,9 @@
   },
   "keywords": ["mod-manager", "total-war", "warhammer", "pack-file", "cli"],
   "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
   "devDependencies": {
     "typescript": "^5.9.3",
     "ts-node": "^10.9.2",

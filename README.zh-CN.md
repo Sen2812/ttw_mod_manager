@@ -23,7 +23,7 @@
 
 ## 环境要求
 
-- **Node.js** 18+ 与 npm
+- **Node.js** 24+ 与 npm
 - 已安装至少一款受支持的全面战争游戏（**Steam**）
 - **Windows**（主要目标平台；core 中含 Linux 启动路径）
 
