@@ -1,0 +1,39 @@
+/**
+ * Workshop display-name helpers.
+ */
+
+import type { Mod } from "../types";
+
+/** Reject Steam error/login placeholder pages and bare numeric IDs. */
+export function isUsableWorkshopTitle(
+  title: string | undefined,
+  workshopId: string,
+): title is string {
+  const t = title?.trim();
+  if (!t) return false;
+  if (t === workshopId) return false;
+  if (/^steam community :: error$/i.test(t)) return false;
+  if (/^steam workshop$/i.test(t)) return false;
+  if (/^login$/i.test(t)) return false;
+  // Cached/API rows sometimes store the numeric ID as the title.
+  if (/^\d{5,15}$/.test(t) && /^\d{5,15}$/.test(workshopId)) return false;
+  return true;
+}
+
+/** Preferred UI label: workshop title → pack file stem. */
+export function getModDisplayName(mod: Pick<Mod, "humanName" | "name" | "workshopId">): string {
+  if (isUsableWorkshopTitle(mod.humanName, mod.workshopId)) return mod.humanName.trim();
+  return mod.name.replace(/\.pack$/i, "");
+}
+
+/** Whether the mod has a resolved workshop display title. */
+export function hasWorkshopDisplayName(mod: Pick<Mod, "humanName" | "workshopId">): boolean {
+  return isUsableWorkshopTitle(mod.humanName, mod.workshopId);
+}
+
+/** Apply a workshop title when it passes validation. */
+export function applyWorkshopTitle(mod: Mod, title: string | undefined): boolean {
+  if (!isUsableWorkshopTitle(title, mod.workshopId)) return false;
+  mod.humanName = title.trim();
+  return true;
+}

@@ -60,6 +60,24 @@ export function findModDataFile(launcherFolder: string = getDefaultLauncherFolde
   }
 }
 
+/** Read CA launcher display names keyed by lowercased pack file name. */
+export function readLauncherModNameIndex(
+  launcherGameId: string,
+  launcherFolder?: string,
+): Map<string, { name: string; short?: string }> {
+  const index = new Map<string, { name: string; short?: string }>();
+  for (const entry of readLauncherData(launcherFolder)) {
+    if (entry.game !== launcherGameId) continue;
+    const name = entry.name?.trim();
+    if (!name) continue;
+    index.set(entry.uuid.toLowerCase(), {
+      name,
+      short: entry.short?.trim() || undefined,
+    });
+  }
+  return index;
+}
+
 /** Read all entries from moddata.dat. Returns [] if the file doesn't exist. */
 export function readLauncherData(
   launcherFolder: string = getDefaultLauncherFolder(),

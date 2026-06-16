@@ -15,6 +15,7 @@ import ModCategorySelect from "./ModCategorySelect";
 import CategoryFilter from "./CategoryFilter";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
+import { getModDisplayName, hasWorkshopDisplayName } from "@core/mod-manager/mod-display";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
 
 // ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
@@ -44,8 +45,8 @@ const ModRow = memo(function ModRow({
   // 仅订阅本行的覆盖统计，避免其他 mod 统计变化导致重渲染
   const stats = useStore(s => mod.isEnabled ? s.overwriteStats?.[mod.name] : undefined);
 
-  const displayName = mod.humanName || mod.name.replace(".pack", "");
-  const hasWorkshopName = !!mod.humanName;
+  const displayName = getModDisplayName(mod);
+  const hasWorkshopName = hasWorkshopDisplayName(mod);
 
   return (
     <div ref={setNodeRef} style={style}
@@ -149,7 +150,7 @@ const ModRow = memo(function ModRow({
 // ─── 拖拽预览 ──────────────────────────────────────────────────────────────
 
 function DragOverlayContent({ mod }: { mod: Mod }) {
-  const displayName = mod.humanName || mod.name.replace(".pack", "");
+  const displayName = getModDisplayName(mod);
   return (
     <div className="drag-overlay flex items-center gap-3 px-4 py-2.5">
       <GripVertical className="w-4 h-4 text-morandi-accent" />

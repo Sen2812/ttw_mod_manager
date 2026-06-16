@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { FileConflict, Mod, ModRelation } from "../types";
+import { getModDisplayName } from "@core/mod-manager/mod-display";
 
 const CATEGORY_COLORS: Record<FileConflict["category"], string> = {
   db: "text-morandi-accent",
@@ -23,7 +24,7 @@ function short(name: string): string {
 
 function modDisplayName(mods: Mod[], packName: string): string {
   const mod = mods.find(m => m.name === packName);
-  return mod?.humanName || short(packName);
+  return mod ? getModDisplayName(mod) : short(packName);
 }
 
 /**
@@ -101,7 +102,7 @@ export default function CompatPanel() {
 
   if (!showCompatPanel || !focusMod) return null;
 
-  const displayName = mod?.humanName || short(focusMod);
+  const displayName = mod?.humanName ? getModDisplayName(mod) : short(focusMod);
   const winCount = stats?.wins ?? winFiles.length;
   const lossCount = stats?.losses ?? lossFiles.length;
   const overwrites = stats?.overwrites ?? [];

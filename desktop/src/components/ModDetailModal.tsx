@@ -5,6 +5,7 @@ import clsx from "clsx";
 import type { Mod } from "../types";
 import ModCategorySelect from "./ModCategorySelect";
 import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
+import { getModDisplayName } from "@core/mod-manager/mod-display";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
 
 interface ModDetailModalProps {
@@ -22,8 +23,8 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
   const [imgError, setImgError] = useState(false);
   const updateStatus = getModUpdateStatus(mod);
 
-  const displayName = mod.humanName || mod.name.replace(".pack", "");
-  const workshopUrl = mod.workshopId && !mod.isInData
+  const displayName = getModDisplayName(mod);
+  const workshopUrl = /^\d{5,15}$/.test(mod.workshopId)
     ? `https://steamcommunity.com/sharedfiles/filedetails/?id=${mod.workshopId}`
     : null;
 

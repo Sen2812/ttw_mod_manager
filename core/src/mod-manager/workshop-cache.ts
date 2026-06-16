@@ -28,6 +28,10 @@ export interface WorkshopItemData {
   requiredIds?: string[];
   /** When title/author was last fetched from the Steam Web API. */
   metadataFetchedAt?: number;
+  /** Steam API result when the item cannot be fetched (e.g. 9 = removed/private). */
+  apiResult?: number;
+  /** Skip repeat API calls for permanently unavailable items. */
+  metadataUnavailable?: boolean;
   /** When requiredIds was last fetched from the workshop page. */
   requiredIdsFetchedAt?: number;
   /** When timeUpdated was last fetched from the Steam Web API. */
@@ -129,6 +133,7 @@ export class WorkshopCache {
     return unique.filter((id) => {
       const entry = this.entries.get(id);
       if (!entry) return true;
+      if (entry.metadataUnavailable) return false;
       if (entry.title) {
         if (mode === "refresh" && entry.metadataFetchedAt !== undefined) {
           return now - entry.metadataFetchedAt > METADATA_TTL_MS;
@@ -136,7 +141,7 @@ export class WorkshopCache {
         return false;
       }
       if (entry.metadataFetchedAt === undefined) return true;
-      return mode === "refresh" && now - entry.metadataFetchedAt > METADATA_TTL_MS;
+      return now - entry.metadataFetchedAt > METADATA_TTL_MS;
     });
   }
 
@@ -169,6 +174,14 @@ export class WorkshopCache {
       if (!entry || entry.timeUpdatedFetchedAt === undefined) return true;
       return now - entry.timeUpdatedFetchedAt > UPDATE_CHECK_TTL_MS;
     });
+  }
+
+  setMetadataUnavailable(id: string, apiResult: number): void {
+    const existing = this.entries.get(id) ?? { publishedfileid: id };
+    existing.apiResult = apiResult;
+    existing.metadataUnavailable = true;
+    existing.metadataFetchedAt = Date.now();
+    this.entries.set(id, existing);
   }
 
   mergeMetadata(items: Iterable<[string, Partial<WorkshopItemData>]>): void {

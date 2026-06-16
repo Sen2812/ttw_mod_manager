@@ -10,7 +10,9 @@ import * as path from "path";
 import * as https from "https";
 import { GameDefinition, GameFolderPaths, Mod } from "../types";
 import { readPackHeader, NodeBinaryReader } from "../pack-file";
-import { fetchWorkshopRequiredIds, sleep } from "./workshop-dependencies";
+import { readLauncherModNameIndex } from "../launcher/launcher-sync";
+import { fetchWorkshopRequiredIds, fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
+import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
 import {
   WorkshopCache,
   type WorkshopItemData,
@@ -90,7 +92,15 @@ export async function fetchWorkshopMetadata(
 
       for (const item of data) {
         if (!item.publishedfileid) continue;
-        const raw = item as WorkshopItemData & { time_updated?: number | string };
+        const raw = item as WorkshopItemData & { result?: number; time_updated?: number | string };
+        const resultCode = raw.result ?? 1;
+        if (resultCode !== 1) {
+          result.set(item.publishedfileid, {
+            publishedfileid: item.publishedfileid,
+            apiResult: resultCode,
+          });
+          continue;
+        }
         const timeUpdated = raw.time_updated != null
           ? Number(raw.time_updated) * 1000
           : undefined;
@@ -119,7 +129,7 @@ function seedCacheFromLocalMods(mods: Mod[], cache: WorkshopCache): void {
   const seeds: [string, Partial<WorkshopItemData>][] = [];
   for (const mod of mods) {
     if (!mod.workshopId || mod.isInData || cache.has(mod.workshopId)) continue;
-    if (!mod.humanName && !mod.author) continue;
+    if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId) && !mod.author) continue;
     seeds.push([mod.workshopId, { title: mod.humanName || undefined, creator: mod.author || undefined }]);
   }
   if (seeds.length > 0) cache.mergeMetadata(seeds);
@@ -151,7 +161,15 @@ export async function getWorkshopMetadata(
     + `${workshopIds.length - needsFetch.length} from cache`,
   );
   const fetched = await fetchWorkshopMetadata(needsFetch, log);
-  cache.mergeMetadata(fetched);
+  const patches: [string, Partial<WorkshopItemData>][] = [];
+  for (const [id, data] of fetched) {
+    if (data.apiResult && data.apiResult !== 1) {
+      cache.setMetadataUnavailable(id, data.apiResult);
+      continue;
+    }
+    patches.push([id, data]);
+  }
+  cache.mergeMetadata(patches);
   cache.save();
   return cache.asMap();
 }
@@ -507,16 +525,36 @@ export async function buildDataMod(
  */
 function readWorkshopMetadata(subfolderPath: string): { humanName?: string; author?: string; tags?: string[] } {
   const result: { humanName?: string; author?: string; tags?: string[] } = {};
+
+  const pickTitle = (value: unknown): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  };
+
+  const applyJsonMetadata = (data: Record<string, unknown>) => {
+    const title =
+      pickTitle(data.title)
+      ?? pickTitle(data.name)
+      ?? pickTitle(data.Title)
+      ?? pickTitle(data.workshop_title)
+      ?? pickTitle(data.WorkshopName);
+    if (title && !result.humanName) result.humanName = title;
+
+    const author =
+      pickTitle(data.creator)
+      ?? pickTitle(data.author)
+      ?? pickTitle(data.Author);
+    if (author && !result.author) result.author = author;
+
+    if (Array.isArray(data.tags) && !result.tags?.length) result.tags = data.tags as string[];
+  };
   
   // Try to read workshop.json
   const workshopJsonPath = path.join(subfolderPath, "workshop.json");
   if (fs.existsSync(workshopJsonPath)) {
     try {
-      const content = fs.readFileSync(workshopJsonPath, "utf8");
-      const data = JSON.parse(content);
-      if (data.title) result.humanName = data.title;
-      if (data.creator) result.author = data.creator;
-      if (data.tags) result.tags = data.tags;
+      applyJsonMetadata(JSON.parse(fs.readFileSync(workshopJsonPath, "utf8")));
     } catch {
       // Failed to parse workshop.json
     }
@@ -526,9 +564,7 @@ function readWorkshopMetadata(subfolderPath: string): { humanName?: string; auth
   const vortexJsonPath = path.join(subfolderPath, "__folder_managed_by_vortex.json");
   if (fs.existsSync(vortexJsonPath)) {
     try {
-      const content = fs.readFileSync(vortexJsonPath, "utf8");
-      const data = JSON.parse(content);
-      if (data.name) result.humanName = data.name;
+      applyJsonMetadata(JSON.parse(fs.readFileSync(vortexJsonPath, "utf8")));
     } catch {
       // Failed to parse vortex json
     }
@@ -552,6 +588,66 @@ function readWorkshopMetadata(subfolderPath: string): { humanName?: string; auth
   }
   
   return result;
+}
+
+function mergeWorkshopContentIntoDataMod(dataMod: Mod, contentMod: Mod): void {
+  if (!dataMod.imgPath && contentMod.imgPath) dataMod.imgPath = contentMod.imgPath;
+  if (!dataMod.author && contentMod.author) dataMod.author = contentMod.author;
+  if (contentMod.tags?.length && (!dataMod.tags?.length || dataMod.tags.every(t => t === "mod"))) {
+    dataMod.tags = contentMod.tags;
+  }
+  if (/^\d{5,15}$/.test(contentMod.workshopId)) {
+    dataMod.workshopId = contentMod.workshopId;
+  }
+  if (!isUsableWorkshopTitle(dataMod.humanName, dataMod.workshopId)) {
+    applyWorkshopTitle(dataMod, contentMod.humanName);
+  }
+}
+
+function applyLauncherModNames(mods: Mod[], game: GameDefinition, log?: LogCallback): number {
+  const index = readLauncherModNameIndex(game.launcherGameId);
+  if (index.size === 0) return 0;
+
+  let applied = 0;
+  for (const mod of mods) {
+    if (isUsableWorkshopTitle(mod.humanName, mod.workshopId)) continue;
+    const entry = index.get(mod.name.toLowerCase());
+    const title = entry?.name?.trim();
+    if (applyWorkshopTitle(mod, title)) applied++;
+  }
+
+  if (applied > 0) {
+    log?.(`CA Launcher moddata: applied ${applied} local workshop title(s)`);
+  }
+  return applied;
+}
+
+async function fetchMissingWorkshopTitles(
+  mods: Mod[],
+  cache: WorkshopCache,
+  log?: LogCallback,
+): Promise<void> {
+  const pending = mods.filter(
+    (m) => /^\d{5,15}$/.test(m.workshopId) && !isUsableWorkshopTitle(m.humanName, m.workshopId),
+  );
+  if (pending.length === 0) return;
+
+  log?.(`Workshop titles: fetching ${pending.length} missing name(s) from workshop pages...`);
+  for (const mod of pending) {
+    await sleep(REQUIRED_FETCH_DELAY_MS);
+    try {
+      const html = await fetchWorkshopHtml(mod.workshopId);
+      const title = parseWorkshopTitle(html);
+      if (applyWorkshopTitle(mod, title)) {
+        cache.mergeMetadata([[mod.workshopId, { title: mod.humanName }]]);
+      } else {
+        log?.(`  Workshop ${mod.workshopId}: title unavailable (removed/private or login required)`);
+      }
+    } catch (e) {
+      log?.(`  Failed to fetch title for ${mod.workshopId}: ${e}`);
+    }
+  }
+  cache.save();
 }
 
 /**
@@ -713,10 +809,7 @@ export async function scanMods(
           // Check if same pack exists in data/ (prefer data version)
           const duplicateInData = mods.find((m) => m.name === mod.name && m.isInData);
           if (duplicateInData) {
-            // Link thumbnail from content to data mod
-            if (!duplicateInData.imgPath && mod.imgPath) {
-              duplicateInData.imgPath = mod.imgPath;
-            }
+            mergeWorkshopContentIntoDataMod(duplicateInData, mod);
             continue;
           }
           mods.push(mod);
@@ -730,6 +823,8 @@ export async function scanMods(
     log?.("Workshop content folder not found (may be a non-Steam install)");
   }
 
+  applyLauncherModNames(mods, game, log);
+
   // Workshop metadata & prerequisites — cache-first, network only when missing.
   if (workshopIds.length > 0 && cacheDir) {
     try {
@@ -742,11 +837,16 @@ export async function scanMods(
       for (const mod of mods) {
         if (mod.workshopId && workshopData.has(mod.workshopId)) {
           const data = workshopData.get(mod.workshopId)!;
-          if (!mod.humanName && data.title) mod.humanName = data.title;
+          if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
+            applyWorkshopTitle(mod, data.title);
+          }
           if (!mod.author && data.creator) mod.author = data.creator;
           if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
         }
       }
+
+      await fetchMissingWorkshopTitles(mods, cache, log);
+      applyLauncherModNames(mods, game, log);
 
       applyWorkshopTimeUpdatedToMods(mods, workshopData);
       await checkWorkshopUpdates(mods, cacheDir, log, false, cache);

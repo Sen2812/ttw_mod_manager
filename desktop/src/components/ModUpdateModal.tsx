@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 import { X, Package, Download, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
+import { getModDisplayName } from "@core/mod-manager/mod-display";
 import ConfirmDialog from "./ConfirmDialog";
 
 function formatDate(ts?: number): string {
@@ -31,7 +32,7 @@ export default function ModUpdateModal() {
 
   if (!show || !mod) return null;
 
-  const displayName = mod.humanName || mod.name.replace(/\.pack$/i, "");
+  const displayName = getModDisplayName(mod);
 
   const handleForceUpdate = async () => {
     setConfirmOpen(false);

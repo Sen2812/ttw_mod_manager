@@ -8,4 +8,5 @@ export * from "./workshop-cache";
 export * from "./category-utils";
 export * from "./workshop-update-status";
 export * from "./workshop-update";
+export * from "./mod-display";
 export * from "./preset-order";

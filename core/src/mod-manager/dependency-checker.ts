@@ -7,6 +7,7 @@
  */
 
 import type { Mod } from "../types";
+import { isUsableWorkshopTitle, getModDisplayName } from "./mod-display";
 
 /** Why a prerequisite is unsatisfied. */
 export type DependencyIssueStatus =
@@ -55,9 +56,9 @@ function workshopDisplayName(
   reqModIdToName: [string, string][] | undefined,
   matched?: Mod,
 ): string {
-  if (matched?.humanName) return matched.humanName;
+  if (matched && isUsableWorkshopTitle(matched.humanName, workshopId)) return matched.humanName;
   const pair = reqModIdToName?.find(([id]) => id === workshopId);
-  if (pair?.[1]) return pair[1];
+  if (pair?.[1] && isUsableWorkshopTitle(pair[1], workshopId)) return pair[1];
   return workshopId;
 }
 
@@ -88,7 +89,7 @@ function classifyWorkshopPrerequisite(
 
 function classifyPackPrerequisite(packName: string, ctx: DependencyCheckContext): DependencyIssue {
   const matched = modByPackName(ctx.mods, packName);
-  const displayName = matched?.humanName || packName.replace(/\.pack$/i, "");
+  const displayName = matched ? getModDisplayName(matched) : packName.replace(/\.pack$/i, "");
   if (matched) {
     if (!matched.isEnabled) {
       return {

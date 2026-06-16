@@ -40,6 +40,7 @@ import {
   type ProfileOrderFile,
   type ImportProfileOrderResult,
 } from "./preset-order";
+import { isUsableWorkshopTitle } from "./mod-display";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
 
@@ -245,7 +246,9 @@ export class ModManager {
       if (presetMod) {
         mod.isEnabled = presetMod.isEnabled;
         mod.loadOrder = presetMod.loadOrder;
-        if (presetMod.humanName) mod.humanName = presetMod.humanName;
+        if (presetMod.humanName && isUsableWorkshopTitle(presetMod.humanName, mod.workshopId)) {
+          mod.humanName = presetMod.humanName;
+        }
         if (presetMod.author) mod.author = presetMod.author;
         if (presetMod.categories) mod.categories = presetMod.categories;
       } else {

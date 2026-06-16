@@ -5,6 +5,7 @@ import { X, AlertTriangle, Package, ExternalLink } from "lucide-react";
 import clsx from "clsx";
 import type { DependencyIssue, DependencyIssueStatus } from "@core/mod-manager/dependency-checker";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
+import { getModDisplayName } from "@core/mod-manager/mod-display";
 
 function shortPack(name: string): string {
   return name.replace(/\.pack$/i, "");
@@ -40,7 +41,7 @@ export default function ModDependencyModal() {
 
   if (!show || !mod) return null;
 
-  const displayName = mod.humanName || shortPack(mod.name);
+  const displayName = getModDisplayName(mod);
   const workshopUrl = (id: string) =>
     `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 
