@@ -519,10 +519,16 @@ function registerIpc() {
 
 // ─── 窗口 ────────────────────────────────────────────────────────────────────
 
+function getAppIconPath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, "icon.png");
+  return path.join(__dirname, "../build/icon.png");
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100, height: 720, minWidth: 800, minHeight: 500,
     frame: false, titleBarStyle: "hidden", backgroundColor: "#F5F0EB",
+    icon: getAppIconPath(),
     webPreferences: { 
       preload: path.join(__dirname, "preload.js"), 
       contextIsolation: true, 

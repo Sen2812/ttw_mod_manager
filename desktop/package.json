@@ -39,6 +39,7 @@
     "appId": "com.github.sen2812.ttw-mod-manager",
     "productName": "TTW Mod Manager",
     "copyright": "Copyright © Sen2812",
+    "icon": "build/icon.png",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -47,6 +48,12 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
     ],
     "win": {
       "target": [
