@@ -28,6 +28,20 @@ export interface AppConfigResponse {
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
   subscribedWorkshopIds?: string[];
   categories?: string[];
+  dataDir?: string;
+}
+
+export interface BootstrapResponse extends AppConfigResponse {
+  mods: Mod[];
+  profileFilterModes?: Record<string, string>;
+  modFilterMode?: string;
+}
+
+export interface ModsUpdatedPayload {
+  mods: Mod[];
+  subscribedWorkshopIds: string[];
+  categories: string[];
+  outdatedCount: number;
 }
 
 export interface ApiResponse<T = any> {
@@ -75,6 +89,7 @@ declare global {
   interface Window {
     api: {
       getMods: () => Promise<Mod[]>;
+      bootstrap: () => Promise<BootstrapResponse>;
       scanMods: () => Promise<{ mods: Mod[]; subscribedWorkshopIds: string[] }>;
       toggleMod: (n: string) => Promise<Mod[] | ApiResponse>;
       enableMod: (n: string) => Promise<Mod[] | ApiResponse>;
@@ -85,7 +100,7 @@ declare global {
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
       resetLoadOrder: () => Promise<Mod[] | ApiResponse>;
       getConfig: () => Promise<AppConfigResponse>;
-      setGame: (g: string) => Promise<{ mods?: Mod[]; presets?: Preset[]; game?: GameInfo; error?: string; subscribedWorkshopIds?: string[] }>;
+      setGame: (g: string) => Promise<{ mods?: Mod[]; presets?: Preset[]; folderPaths?: AppConfigResponse["folderPaths"]; game?: GameInfo; error?: string; subscribedWorkshopIds?: string[] }>;
       getPresets: () => Promise<Preset[]>;
       createPreset: (n: string, copyFromCurrent?: boolean) => Promise<Preset[] | ApiResponse>;
       applyPreset: (n: string) => Promise<Mod[] | ApiResponse>;
@@ -125,6 +140,7 @@ declare global {
       onConfirmClose: (callback: () => void) => void;
       closeDecision: (choice: "save" | "discard" | "cancel") => void;
       onSaveBeforeClose: (callback: () => void) => void;
+      onModsUpdated: (callback: (payload: ModsUpdatedPayload) => void) => void;
       minimize?: () => void;
       maximize?: () => void;
       close?: () => void;

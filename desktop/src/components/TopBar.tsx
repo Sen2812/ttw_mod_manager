@@ -25,19 +25,17 @@ export default function TopBar() {
         return;
       }
       if (result.mods) {
-        setMods(result.mods); setCurrentGame(gameId);
+        setMods(result.mods);
+        setCurrentGame(gameId);
+        if (result.presets) setPresets(result.presets);
+        if (result.folderPaths) setFolderPaths(result.folderPaths);
         useStore.setState({
           originalMods: result.mods,
           subscribedWorkshopIds: result.subscribedWorkshopIds ?? [],
           categories: await window.api.getCategories(),
           categoryFilter: null,
         });
-        const config = await window.api.getConfig();
-        setPresets(config.presets); setFolderPaths(config.folderPaths);
-        window.api.checkModUpdates(false).then((updateResult) => {
-          setMods(updateResult.mods);
-        }).catch(console.error);
-        // 切换游戏加载的是新游戏的已保存状态，丢弃当前未保存修改
+        // 工坊元数据/更新检查由主进程后台 enrich 完成后通过 onModsUpdated 推送
         markClean();
       }
     } catch (e) {
