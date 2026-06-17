@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from "elect
 import { exec } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import { fileURLToPath } from "url";
 
 import { ModManager, sortByLoadOrder } from "../../core/src";
 import { gameRegistry, BUILTIN_GAMES } from "../../core/src";
@@ -13,9 +14,15 @@ import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
 let dataDir: string; // 数据持久化目录
+let initPromise: Promise<void> | null = null;
+let deferredWorkshopGeneration = 0;
+let appLog: (msg: string) => void = msg => console.log(msg);
 let hasUnsavedChanges = false; // 追踪未保存的更改
 // 关闭确认：主进程等待渲染进程返回决定（save / discard / cancel）
 let pendingCloseDecision: ((choice: "save" | "discard" | "cancel") => void) | null = null;
@@ -38,6 +45,75 @@ function saveSettings(s: any): void {
 }
 
 function ensureDataDir(dir: string): void { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+
+const APP_LOG_FILE = "app.log";
+
+/** Append logs to dataDir/app.log for player support uploads. */
+function createAppLogger(logPath: string): (msg: string) => void {
+  try {
+    fs.writeFileSync(
+      logPath,
+      `--- session ${new Date().toISOString()} ---\n`,
+      { flag: "a" },
+    );
+  } catch { /* ignore */ }
+
+  return (msg: string) => {
+    const line = `[${new Date().toISOString()}] ${msg}`;
+    console.log(line);
+    try {
+      fs.appendFileSync(logPath, line + "\n", "utf8");
+    } catch { /* ignore */ }
+  };
+}
+
+async function ensureInit(): Promise<void> {
+  if (!initPromise) throw new Error("ModManager not started");
+  await initPromise;
+}
+
+function buildBootstrapPayload() {
+  const ui = loadUiState();
+  return {
+    currentGame: mm.config.currentGame,
+    games: BUILTIN_GAMES.map(g => ({ id: g.id, name: g.displayName })),
+    presets: mm.getPresets(),
+    currentPresetName: mm.getActivePresetName(),
+    folderPaths: mm.folderPaths,
+    profileFilterModes: ui.profileFilterModes ?? {},
+    modFilterMode: ui.modFilterMode ?? "all",
+    subscribedWorkshopIds: mm.subscribedWorkshopIds,
+    categories: mm.getCategories(),
+    dataDir,
+    mods: mm.getMods(),
+  };
+}
+
+function notifyModsUpdated(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("mods-updated", {
+    mods: mm.getMods(),
+    subscribedWorkshopIds: mm.subscribedWorkshopIds,
+    categories: mm.getCategories(),
+    outdatedCount: countOutdatedMods(mm.getMods()),
+  });
+}
+
+/** Background workshop API/HTML fetches and update checks after first paint. */
+async function runDeferredWorkshopEnrichment(): Promise<void> {
+  const gen = ++deferredWorkshopGeneration;
+  try {
+    await mm.enrichWorkshopNetwork();
+    if (gen !== deferredWorkshopGeneration) return;
+    notifyModsUpdated();
+
+    await mm.checkModUpdates(false);
+    if (gen !== deferredWorkshopGeneration) return;
+    notifyModsUpdated();
+  } catch (e) {
+    appLog(`Deferred workshop enrichment failed: ${e}`);
+  }
+}
 
 // ─── UI 状态（存在数据目录下）────────────────────────────────────────────────
 
@@ -128,8 +204,15 @@ function readProfileOrderImport(): {
 }
 
 function registerIpc() {
+  // ── 启动引导（等待后台 init，一次返回配置 + mod 列表）──────────────────
+  ipcMain.handle("bootstrap", async () => {
+    await ensureInit();
+    return buildBootstrapPayload();
+  });
+
   // ── 配置 ─────────────────────────────────────────────────────────────────
-  ipcMain.handle("get-config", () => {
+  ipcMain.handle("get-config", async () => {
+    await ensureInit();
     const ui = loadUiState();
     return {
       currentGame: mm.config.currentGame,
@@ -164,9 +247,11 @@ function registerIpc() {
   });
 
   // ── Mod 操作 ─────────────────────────────────────────────────────────────
-  ipcMain.handle("get-mods", () => mm.getMods());
+  ipcMain.handle("get-mods", async () => { await ensureInit(); return mm.getMods(); });
   ipcMain.handle("scan-mods", async () => {
-    await mm.scanMods();
+    await ensureInit();
+    await mm.scanMods({ deferNetwork: true });
+    void runDeferredWorkshopEnrichment();
     return { mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
   });
   ipcMain.handle("toggle-mod", (_e, n: string) => { mm.toggleMod(n); return mm.getMods(); });
@@ -343,11 +428,14 @@ function registerIpc() {
 
   // ── 切换游戏 ─────────────────────────────────────────────────────────────
   ipcMain.handle("set-game", async (_e, g: string) => {
+    await ensureInit();
     try {
       await mm.setGame(g as SupportedGame);
+      void runDeferredWorkshopEnrichment();
       return {
         mods: mm.getMods(),
         presets: mm.getPresets(),
+        folderPaths: mm.folderPaths,
         game: { id: g, name: mm.currentGame?.displayName },
         subscribedWorkshopIds: mm.subscribedWorkshopIds,
       };
@@ -374,6 +462,7 @@ function registerIpc() {
     dataDir = newDir;
     // 同步迁移 ModManager 到新目录（重新加载配置与扫描 mod）
     await mm.setConfigDir(newDir);
+    void runDeferredWorkshopEnrichment();
     return { ok: true, dataDir };
   });
 
@@ -524,13 +613,19 @@ function getAppIconPath(): string {
   return path.join(__dirname, "../build/icon.png");
 }
 
+function getPreloadPath(): string {
+  const cjs = path.join(__dirname, "preload.cjs");
+  if (fs.existsSync(cjs)) return cjs;
+  return path.join(__dirname, "preload.js");
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100, height: 720, minWidth: 800, minHeight: 500,
     frame: false, titleBarStyle: "hidden", backgroundColor: "#F5F0EB",
     icon: getAppIconPath(),
     webPreferences: { 
-      preload: path.join(__dirname, "preload.js"), 
+      preload: getPreloadPath(), 
       contextIsolation: true, 
       nodeIntegration: false,
       webSecurity: false,  // 允许访问本地文件
@@ -605,10 +700,21 @@ app.whenReady().then(async () => {
   dataDir = settings.dataDir ?? app.getPath("userData");
   ensureDataDir(dataDir);
 
-  mm = new ModManager({ configDir: dataDir, log: msg => console.log("[core]", msg) });
-  await mm.init();
+  appLog = createAppLogger(path.join(dataDir, APP_LOG_FILE));
+  appLog("Application starting...");
+
+  mm = new ModManager({ configDir: dataDir, log: msg => appLog(`[core] ${msg}`) });
   registerIpc();
   createWindow();
+
+  initPromise = mm.init().then(() => {
+    appLog("Mod manager initialized");
+  }).catch(err => {
+    appLog(`Init failed: ${err}`);
+    throw err;
+  });
+
+  void initPromise.then(() => runDeferredWorkshopEnrichment());
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

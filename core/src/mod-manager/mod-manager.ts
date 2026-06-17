@@ -10,7 +10,7 @@ import * as path from "path";
 import { GameDefinition, GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
 import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
-import { scanMods, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, findSteamPath } from "./mod-discovery";
+import { scanMods, enrichWorkshopNetwork, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, findSteamPath, type ScanModsOptions } from "./mod-discovery";
 import {
   forceWorkshopModUpdate,
 } from "./workshop-update";
@@ -170,15 +170,15 @@ export class ModManager {
     // Resolve folder paths
     this.folderPaths = await resolveGameFolderPaths(gameDef, this.log);
 
-    // Scan mods
-    await this.scanMods();
+    // Scan mods (fast path: cache-only workshop data; network enrichment runs separately)
+    await this.scanMods({ deferNetwork: true });
   }
 
   /** Re-scan mods from disk */
-  async scanMods(): Promise<Mod[]> {
+  async scanMods(options: ScanModsOptions = {}): Promise<Mod[]> {
     if (!this.currentGame) throw new Error("No game selected");
 
-    const result = await scanMods(this.currentGame, this.folderPaths, this.configDir, this.log);
+    const result = await scanMods(this.currentGame, this.folderPaths, this.configDir, this.log, options);
     this.mods = result.mods;
     this.vanillaPacks = result.vanillaPacks;
     this.subscribedWorkshopIds = result.subscribedWorkshopIds;
@@ -201,6 +201,21 @@ export class ModManager {
 
     this.log(`Loaded ${this.mods.length} mods (${this.mods.filter((m) => m.isEnabled).length} enabled)`);
     return this.mods;
+  }
+
+  /** Fetch deferred workshop metadata, prerequisites, and update timestamps. */
+  async enrichWorkshopNetwork(): Promise<void> {
+    if (!this.currentGame) return;
+    await enrichWorkshopNetwork(
+      this.mods,
+      this.currentGame,
+      this.configDir,
+      this.subscribedWorkshopIds,
+      this.log,
+    );
+    this.mods = sortByLoadOrder(this.mods);
+    for (const mod of this.mods) seedModCategoryFromTags(mod);
+    this.syncCategoryRegistry();
   }
 
   /** Load presets and restore the current preset state */
@@ -612,7 +627,7 @@ export class ModManager {
     });
 
     if (result.ok) {
-      await this.scanMods();
+      await this.scanMods({ deferNetwork: false });
     }
     return result;
   }

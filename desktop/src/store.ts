@@ -65,8 +65,7 @@ export const useStore = create<AppState>((set, get) => ({
   setFolderPaths: (folderPaths) => set({ folderPaths }), setFilter: (filter) => set({ filter }),
   setActivePresetName: (activePresetName) => {
     set({ activePresetName });
-    // 同步到后端，确保后续 toggle / 保存会写入正确的 preset
-    window.api.setActivePresetName(activePresetName).catch(console.error);
+    window.api?.setActivePresetName(activePresetName).catch(console.error);
   },
   setIsScanning: (isScanning) => set({ isScanning }), setIsLaunching: (isLaunching) => set({ isLaunching }),
   setShowGameMenu: (showGameMenu) => set({ showGameMenu }),
@@ -79,6 +78,7 @@ export const useStore = create<AppState>((set, get) => ({
     else set({ showCompatPanel: true });
   },
   refreshOverwriteStats: async (opts) => {
+    if (!window.api) return;
     try {
       const result = await window.api.analyzeOverwrites();
       set({ overwriteStats: result.modStats });
@@ -96,22 +96,21 @@ export const useStore = create<AppState>((set, get) => ({
   setIsCheckingUpdates: (isCheckingUpdates) => set({ isCheckingUpdates }),
   markDirty: () => {
     set({ isDirty: true });
-    // 通知 electron 主进程有未保存的更改
-    window.api.setUnsavedChanges(true).catch(console.error);
+    window.api?.setUnsavedChanges(true).catch(console.error);
   },
   markClean: () => {
     set({ isDirty: false });
-    // 通知 electron 主进程没有未保存的更改
-    window.api.setUnsavedChanges(false).catch(console.error);
+    window.api?.setUnsavedChanges(false).catch(console.error);
   },
   saveCurrentState: async () => {
     const { mods } = get();
+    if (!window.api) return;
     set({ isSaving: true });
     try {
       await window.api.saveModState(mods);
       set({ isDirty: false });
       // 通知 electron 主进程已保存
-      window.api.setUnsavedChanges(false).catch(console.error);
+      window.api?.setUnsavedChanges(false).catch(console.error);
       // 刷新 presets，让各 profile 的启用计数反映最新保存的状态
       set({ presets: await window.api.getPresets() });
     } catch (e) {

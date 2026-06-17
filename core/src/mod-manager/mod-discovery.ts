@@ -746,6 +746,96 @@ export interface ScanResult {
   subscribedWorkshopIds: string[];
 }
 
+export interface ScanModsOptions {
+  /** Skip Steam/network workshop fetches; use on-disk cache only for fast startup. */
+  deferNetwork?: boolean;
+}
+
+function applyWorkshopMetadataFromCache(mods: Mod[], cache: WorkshopCache): void {
+  const workshopData = cache.asMap();
+  for (const mod of mods) {
+    if (mod.workshopId && workshopData.has(mod.workshopId)) {
+      const data = workshopData.get(mod.workshopId)!;
+      if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
+        applyWorkshopTitle(mod, data.title);
+      }
+      if (!mod.author && data.creator) mod.author = data.creator;
+      if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+    }
+  }
+  applyWorkshopTimeUpdatedToMods(mods, workshopData);
+}
+
+function applyCachedWorkshopDependencies(mods: Mod[], cache: WorkshopCache): void {
+  const data = cache.asMap();
+  for (const mod of mods) {
+    if (!isNumericWorkshopId(mod.workshopId)) continue;
+    const requiredIds = data.get(mod.workshopId)?.requiredIds ?? [];
+    if (requiredIds.length === 0) continue;
+    mod.reqModIds = requiredIds;
+    mod.reqModIdToName = requiredIds.map(id => [id, data.get(id)?.title ?? id]);
+  }
+}
+
+/** Apply cached workshop data only (no network). Used for fast startup scans. */
+function applyCachedWorkshopData(
+  mods: Mod[],
+  cache: WorkshopCache,
+  game: GameDefinition,
+  log?: LogCallback,
+): void {
+  applyWorkshopMetadataFromCache(mods, cache);
+  applyCachedWorkshopDependencies(mods, cache);
+  applyLauncherModNames(mods, game, log);
+  log?.("Workshop cache applied (network deferred)");
+}
+
+/**
+ * Fetch missing workshop metadata, prerequisites, and update timestamps.
+ * Call after a fast scan when `deferNetwork` was used.
+ */
+export async function enrichWorkshopNetwork(
+  mods: Mod[],
+  game: GameDefinition,
+  cacheDir: string,
+  subscribedWorkshopIds: string[],
+  log?: LogCallback,
+): Promise<void> {
+  const workshopIds = subscribedWorkshopIds;
+  if (workshopIds.length === 0 || !cacheDir) return;
+
+  try {
+    const cache = new WorkshopCache(cacheDir).load();
+    seedCacheFromLocalMods(mods, cache);
+    cache.save();
+
+    const workshopData = await getWorkshopMetadata(workshopIds, cacheDir, log, "routine", cache);
+
+    for (const mod of mods) {
+      if (mod.workshopId && workshopData.has(mod.workshopId)) {
+        const data = workshopData.get(mod.workshopId)!;
+        if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
+          applyWorkshopTitle(mod, data.title);
+        }
+        if (!mod.author && data.creator) mod.author = data.creator;
+        if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+      }
+    }
+
+    await fetchMissingWorkshopTitles(mods, cache, log);
+    applyLauncherModNames(mods, game, log);
+
+    applyWorkshopTimeUpdatedToMods(mods, workshopData);
+    await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
+
+    await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
+
+    log?.("Workshop network enrichment complete");
+  } catch (e) {
+    log?.(`Workshop network enrichment failed: ${e}`);
+  }
+}
+
 /**
  * Scan all mod sources for a game and return the complete mod list.
  */
@@ -754,7 +844,9 @@ export async function scanMods(
   folderPaths: GameFolderPaths,
   cacheDir?: string,
   log?: LogCallback,
+  options: ScanModsOptions = {},
 ): Promise<ScanResult> {
+  const deferNetwork = options.deferNetwork === true;
   const mods: Mod[] = [];
 
   if (!folderPaths.gamePath) {
@@ -837,35 +929,39 @@ export async function scanMods(
 
   applyLauncherModNames(mods, game, log);
 
-  // Workshop metadata & prerequisites — cache-first, network only when missing.
+  // Workshop metadata & prerequisites — cache-first; network optional when deferNetwork.
   if (workshopIds.length > 0 && cacheDir) {
     try {
       const cache = new WorkshopCache(cacheDir).load();
       seedCacheFromLocalMods(mods, cache);
       cache.save();
 
-      const workshopData = await getWorkshopMetadata(workshopIds, cacheDir, log, "routine", cache);
+      if (deferNetwork) {
+        applyCachedWorkshopData(mods, cache, game, log);
+      } else {
+        const workshopData = await getWorkshopMetadata(workshopIds, cacheDir, log, "routine", cache);
 
-      for (const mod of mods) {
-        if (mod.workshopId && workshopData.has(mod.workshopId)) {
-          const data = workshopData.get(mod.workshopId)!;
-          if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
-            applyWorkshopTitle(mod, data.title);
+        for (const mod of mods) {
+          if (mod.workshopId && workshopData.has(mod.workshopId)) {
+            const data = workshopData.get(mod.workshopId)!;
+            if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
+              applyWorkshopTitle(mod, data.title);
+            }
+            if (!mod.author && data.creator) mod.author = data.creator;
+            if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
           }
-          if (!mod.author && data.creator) mod.author = data.creator;
-          if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
         }
+
+        await fetchMissingWorkshopTitles(mods, cache, log);
+        applyLauncherModNames(mods, game, log);
+
+        applyWorkshopTimeUpdatedToMods(mods, workshopData);
+        await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
+
+        await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
+
+        log?.("Workshop cache applied");
       }
-
-      await fetchMissingWorkshopTitles(mods, cache, log);
-      applyLauncherModNames(mods, game, log);
-
-      applyWorkshopTimeUpdatedToMods(mods, workshopData);
-      await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
-
-      await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
-
-      log?.("Workshop cache applied");
     } catch (e) {
       log?.(`Error loading Workshop cache: ${e}`);
     }
