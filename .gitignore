@@ -40,6 +40,16 @@ Desktop.ini
 .env.local
 .env.*.local
 
+# Local mod-manager runtime data (never commit — user/cache/config)
+**/workshop-cache.json
+**/workshop-cache-timestamp.json
+**/mod-manager-config.json
+presets-*.json
+ui-state.json
+
+# Vite
+.vite/
+
 # Electron
 desktop/out/
 desktop/release/
