@@ -2,7 +2,6 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from "elect
 import { exec } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
-import { fileURLToPath } from "url";
 
 import { ModManager, sortByLoadOrder } from "../../core/src";
 import { gameRegistry, BUILTIN_GAMES } from "../../core/src";
@@ -13,9 +12,6 @@ import { generateUsedModsContent } from "../../core/src/launcher/used-mods";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
