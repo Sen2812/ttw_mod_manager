@@ -31,6 +31,19 @@ const API_BATCH_DELAY_MS = 1200;
 /** Delay between workshop HTML prerequisite fetches. */
 const REQUIRED_FETCH_DELAY_MS = 1500;
 
+function isNumericWorkshopId(id: string | undefined): id is string {
+  return !!id && /^\d{5,15}$/.test(id);
+}
+
+/** Workshop item IDs to resolve prerequisites for (mods + subscribed content folders). */
+function collectWorkshopItemIds(mods: Mod[], subscribedWorkshopIds: string[]): string[] {
+  const ids = [
+    ...mods.map(m => m.workshopId).filter(isNumericWorkshopId),
+    ...subscribedWorkshopIds.filter(isNumericWorkshopId),
+  ];
+  return [...new Set(ids)];
+}
+
 // ─── Steam Workshop API ──────────────────────────────────────────────────────
 
 /**
@@ -248,12 +261,11 @@ async function applyWorkshopDependencies(
   mods: Mod[],
   cache: WorkshopCache,
   cacheDir: string,
+  subscribedWorkshopIds: string[],
   log?: LogCallback,
   mode: WorkshopFetchMode = "routine",
 ): Promise<void> {
-  const workshopModIds = [...new Set(
-    mods.filter(m => m.workshopId && !m.isInData).map(m => m.workshopId),
-  )];
+  const workshopModIds = collectWorkshopItemIds(mods, subscribedWorkshopIds);
 
   await ensureWorkshopRequiredIds(workshopModIds, cache, log, mode);
 
@@ -272,7 +284,7 @@ async function applyWorkshopDependencies(
 
   const data = cache.asMap();
   for (const mod of mods) {
-    if (!mod.workshopId || mod.isInData) continue;
+    if (!isNumericWorkshopId(mod.workshopId)) continue;
     const requiredIds = data.get(mod.workshopId)?.requiredIds ?? [];
     if (requiredIds.length === 0) continue;
     mod.reqModIds = requiredIds;
@@ -851,7 +863,7 @@ export async function scanMods(
       applyWorkshopTimeUpdatedToMods(mods, workshopData);
       await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
 
-      await applyWorkshopDependencies(mods, cache, cacheDir, log);
+      await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
 
       log?.("Workshop cache applied");
     } catch (e) {
