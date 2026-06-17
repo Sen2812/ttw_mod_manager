@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import electron from "vite-plugin-electron";
+import { esmShim } from "vite-plugin-electron/plugin";
 import renderer from "vite-plugin-electron-renderer";
 import path from "path";
 import { copyFileSync, mkdirSync } from "fs";
@@ -13,6 +14,11 @@ function copyPreloadCjs(): void {
     path.join(outDir, "preload.cjs"),
   );
 }
+
+const electronBuild = {
+  outDir: "dist-electron",
+  rolldownOptions: { external: ["electron"] },
+};
 
 export default defineConfig({
   plugins: [
@@ -29,7 +35,7 @@ export default defineConfig({
     electron([
       {
         entry: "electron/main.ts",
-        vite: { build: { outDir: "dist-electron", rollupOptions: { external: ["electron"] } } },
+        vite: { plugins: [esmShim()], build: electronBuild },
       },
     ]),
     renderer(),
