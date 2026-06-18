@@ -5,6 +5,7 @@ import { useViewModeStore } from "../viewModeStore";
 import ConfirmDialog from "./ConfirmDialog";
 import { Plus, Trash2, RefreshCw, Save, Loader2, Star, Pencil, Check, X, Download, Upload } from "lucide-react";
 import clsx from "clsx";
+import { scanEnabledDependencyReports } from "../utils/dependency-actions";
 
 /** 统计一个 preset/mod 列表中已启用的数量 */
 function countEnabled(mods: { isEnabled: boolean }[]): number {
@@ -15,7 +16,8 @@ export default function Sidebar() {
   const t = useT();
   const { presets, activePresetName, setActivePresetName, setShowNewPresetModal,
     setMods, setPresets, enabledCount, totalCount, originalTotalCount,
-    isDirty, isSaving, saveCurrentState, markClean, markDirty, currentGame, mods } = useStore();
+    isDirty, isSaving, saveCurrentState, markClean, markDirty, currentGame, mods,
+    subscribedWorkshopIds, openDependencyAlert } = useStore();
   const [presetToDelete, setPresetToDelete] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [importResultMsg, setImportResultMsg] = useState<string | null>(null);
@@ -35,15 +37,20 @@ export default function Sidebar() {
     }
   }, [renamingPreset]);
 
+  const notifyDependencyIssues = (nextMods: typeof mods) => {
+    const reports = scanEnabledDependencyReports(nextMods, subscribedWorkshopIds);
+    if (reports.length > 0) openDependencyAlert(reports);
+  };
+
   const doApply = async (name: string) => {
     const result = await window.api.applyPreset(name);
     if (Array.isArray(result)) {
       setMods(result);
       setActivePresetName(name);
       setPresets(await window.api.getPresets());
-      // 切换 profile 加载的是已保存状态，丢弃当前未保存修改并清除 dirty 标记
       markClean();
       useStore.setState({ originalMods: result });
+      notifyDependencyIssues(result);
     }
   };
 
@@ -102,6 +109,7 @@ export default function Sidebar() {
       if (result.mods) {
         setMods(result.mods);
         markDirty();
+        notifyDependencyIssues(result.mods);
       }
       if (result.applied !== undefined) {
         setImportResultMsg(t("sidebar.importResult", {

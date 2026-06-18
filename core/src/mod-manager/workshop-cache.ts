@@ -34,6 +34,8 @@ export interface WorkshopItemData {
   metadataUnavailable?: boolean;
   /** When requiredIds was last fetched from the workshop page. */
   requiredIdsFetchedAt?: number;
+  /** Last prerequisite fetch failed (network); do not treat as "no prerequisites". */
+  requiredIdsFetchFailed?: boolean;
   /** When timeUpdated was last fetched from the Steam Web API. */
   timeUpdatedFetchedAt?: number;
 }
@@ -156,7 +158,7 @@ export class WorkshopCache {
     const unique = [...new Set(ids)];
     return unique.filter((id) => {
       const entry = this.entries.get(id);
-      if (!entry || entry.requiredIds === undefined) return true;
+      if (!entry || entry.requiredIds === undefined || entry.requiredIdsFetchFailed) return true;
       if (entry.requiredIdsFetchedAt === undefined) return false;
       if (mode === "refresh") {
         return now - entry.requiredIdsFetchedAt > REQUIRED_IDS_TTL_MS;
@@ -210,10 +212,11 @@ export class WorkshopCache {
     }
   }
 
-  setRequiredIds(id: string, requiredIds: string[]): void {
+  setRequiredIds(id: string, requiredIds: string[], fetchFailed = false): void {
     const existing = this.entries.get(id) ?? { publishedfileid: id };
     existing.requiredIds = requiredIds;
     existing.requiredIdsFetchedAt = Date.now();
+    existing.requiredIdsFetchFailed = fetchFailed;
     this.entries.set(id, existing);
   }
 }

@@ -9,7 +9,9 @@ import SettingsPage from "./components/SettingsPage";
 import CompatPanel from "./components/CompatPanel";
 import ModDependencyModal from "./components/ModDependencyModal";
 import ModUpdateModal from "./components/ModUpdateModal";
+import DependencyAlertModal from "./components/DependencyAlertModal";
 import ConfirmDialog from "./components/ConfirmDialog";
+import { scanEnabledDependencyReports } from "./utils/dependency-actions";
 import type { BootstrapResponse, Mod, ModsUpdatedPayload } from "./types";
 
 function applyModsPayload(
@@ -62,6 +64,14 @@ function AppShell() {
   useEffect(() => {
     const onModsUpdated = (payload: ModsUpdatedPayload) => {
       applyModsPayload(payload, setMods);
+      if (!Array.isArray(payload.mods)) return;
+      const reports = scanEnabledDependencyReports(
+        payload.mods,
+        payload.subscribedWorkshopIds ?? [],
+      );
+      if (reports.length > 0 && !useStore.getState().dependencyAlertReports) {
+        useStore.getState().openDependencyAlert(reports);
+      }
     };
 
     if (typeof window.api.onModsUpdated === "function") {
@@ -125,6 +135,7 @@ function AppShell() {
       <CompatPanel />
       <ModDependencyModal />
       <ModUpdateModal />
+      <DependencyAlertModal />
 
       <ConfirmDialog
         open={showCloseConfirm}

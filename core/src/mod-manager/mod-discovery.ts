@@ -11,7 +11,7 @@ import * as https from "https";
 import { GameDefinition, GameFolderPaths, Mod } from "../types";
 import { readPackHeader, NodeBinaryReader } from "../pack-file";
 import { readLauncherModNameIndex } from "../launcher/launcher-sync";
-import { fetchWorkshopRequiredIds, fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
+import { fetchWorkshopRequiredIdsCombined, fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
 import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
 import {
   WorkshopCache,
@@ -35,10 +35,21 @@ function isNumericWorkshopId(id: string | undefined): id is string {
   return !!id && /^\d{5,15}$/.test(id);
 }
 
+/** Resolve a mod's numeric Steam Workshop ID from workshopId or pack file name. */
+export function resolveModWorkshopId(mod: Pick<Mod, "workshopId" | "name">): string | undefined {
+  const workshopId = mod.workshopId;
+  if (isNumericWorkshopId(workshopId)) return workshopId;
+  const fromName = mod.name.match(/^(\d{5,15})\.pack$/i);
+  if (fromName) return fromName[1];
+  const fromWorkshopField = /^(\d{5,15})\.pack$/i.exec(workshopId);
+  if (fromWorkshopField) return fromWorkshopField[1];
+  return undefined;
+}
+
 /** Workshop item IDs to resolve prerequisites for (mods + subscribed content folders). */
 function collectWorkshopItemIds(mods: Mod[], subscribedWorkshopIds: string[]): string[] {
   const ids = [
-    ...mods.map(m => m.workshopId).filter(isNumericWorkshopId),
+    ...mods.map(m => resolveModWorkshopId(m)).filter(isNumericWorkshopId),
     ...subscribedWorkshopIds.filter(isNumericWorkshopId),
   ];
   return [...new Set(ids)];
@@ -141,9 +152,10 @@ export async function fetchWorkshopMetadata(
 function seedCacheFromLocalMods(mods: Mod[], cache: WorkshopCache): void {
   const seeds: [string, Partial<WorkshopItemData>][] = [];
   for (const mod of mods) {
-    if (!mod.workshopId || mod.isInData || cache.has(mod.workshopId)) continue;
-    if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId) && !mod.author) continue;
-    seeds.push([mod.workshopId, { title: mod.humanName || undefined, creator: mod.author || undefined }]);
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId || mod.isInData || cache.has(workshopId)) continue;
+    if (!isUsableWorkshopTitle(mod.humanName, workshopId) && !mod.author) continue;
+    seeds.push([workshopId, { title: mod.humanName || undefined, creator: mod.author || undefined }]);
   }
   if (seeds.length > 0) cache.mergeMetadata(seeds);
 }
@@ -244,11 +256,11 @@ async function ensureWorkshopRequiredIds(
     if (i > 0) await sleep(REQUIRED_FETCH_DELAY_MS);
     const id = needsFetch[i];
     try {
-      const requiredIds = await fetchWorkshopRequiredIds(id);
-      cache.setRequiredIds(id, requiredIds);
+      const { requiredIds, fetchFailed } = await fetchWorkshopRequiredIdsCombined(id);
+      cache.setRequiredIds(id, requiredIds, fetchFailed);
     } catch (e) {
       log?.(`  Failed to fetch prerequisites for ${id}: ${e}`);
-      cache.setRequiredIds(id, []);
+      cache.setRequiredIds(id, [], true);
     }
   }
 
@@ -284,14 +296,13 @@ async function applyWorkshopDependencies(
 
   const data = cache.asMap();
   for (const mod of mods) {
-    if (!isNumericWorkshopId(mod.workshopId)) continue;
-    const requiredIds = data.get(mod.workshopId)?.requiredIds ?? [];
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId) continue;
+    const requiredIds = data.get(workshopId)?.requiredIds ?? [];
     if (requiredIds.length === 0) continue;
     mod.reqModIds = requiredIds;
-    mod.reqModIdToName = requiredIds.map(id => [
-      id,
-      data.get(id)?.title ?? id,
-    ]);
+    mod.reqModIdToName = requiredIds.map(id => [id, data.get(id)?.title ?? id]);
+    if (!isNumericWorkshopId(mod.workshopId)) mod.workshopId = workshopId;
   }
 }
 
@@ -509,13 +520,15 @@ export async function buildDataMod(
     // Header read failed, leave defaults
   }
 
+  const numericWorkshopId = fileName.match(/^(\d{5,15})\.pack$/i)?.[1];
+
   return {
     humanName: "",
     name: fileName,
     path: filePath,
     modDirectory: path.dirname(filePath),
     imgPath,
-    workshopId: fileName,
+    workshopId: numericWorkshopId ?? fileName,
     isEnabled: false,
     isInData: true,
     isInModding,
@@ -613,6 +626,15 @@ function mergeWorkshopContentIntoDataMod(dataMod: Mod, contentMod: Mod): void {
   }
   if (!isUsableWorkshopTitle(dataMod.humanName, dataMod.workshopId)) {
     applyWorkshopTitle(dataMod, contentMod.humanName);
+  }
+  if ((!dataMod.dependencyPacks || dataMod.dependencyPacks.length === 0) && contentMod.dependencyPacks?.length) {
+    dataMod.dependencyPacks = [...contentMod.dependencyPacks];
+  }
+  if ((!dataMod.reqModIds || dataMod.reqModIds.length === 0) && contentMod.reqModIds?.length) {
+    dataMod.reqModIds = [...contentMod.reqModIds];
+    if (contentMod.reqModIdToName?.length) {
+      dataMod.reqModIdToName = contentMod.reqModIdToName.map(([id, name]) => [id, name]);
+    }
   }
 }
 
@@ -769,11 +791,13 @@ function applyWorkshopMetadataFromCache(mods: Mod[], cache: WorkshopCache): void
 function applyCachedWorkshopDependencies(mods: Mod[], cache: WorkshopCache): void {
   const data = cache.asMap();
   for (const mod of mods) {
-    if (!isNumericWorkshopId(mod.workshopId)) continue;
-    const requiredIds = data.get(mod.workshopId)?.requiredIds ?? [];
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId) continue;
+    const requiredIds = data.get(workshopId)?.requiredIds ?? [];
     if (requiredIds.length === 0) continue;
     mod.reqModIds = requiredIds;
     mod.reqModIdToName = requiredIds.map(id => [id, data.get(id)?.title ?? id]);
+    if (!isNumericWorkshopId(mod.workshopId)) mod.workshopId = workshopId;
   }
 }
 
@@ -834,6 +858,50 @@ export async function enrichWorkshopNetwork(
   } catch (e) {
     log?.(`Workshop network enrichment failed: ${e}`);
   }
+}
+
+/**
+ * Force-fetch and apply workshop prerequisites for one mod (e.g. on enable).
+ * Re-fetches when cache is empty or a previous fetch failed.
+ */
+export async function ensureModPrerequisites(
+  mods: Mod[],
+  modName: string,
+  game: GameDefinition,
+  cacheDir: string,
+  subscribedWorkshopIds: string[],
+  log?: LogCallback,
+): Promise<void> {
+  const mod = mods.find(m => m.name === modName);
+  if (!mod || !cacheDir) return;
+
+  const workshopId = resolveModWorkshopId(mod);
+  if (!workshopId) return;
+
+  const cache = new WorkshopCache(cacheDir).load();
+  const entry = cache.get(workshopId);
+  const shouldFetch = !mod.reqModIds?.length
+    || entry?.requiredIds === undefined
+    || entry.requiredIdsFetchFailed;
+
+  if (shouldFetch) {
+    try {
+      const { requiredIds, fetchFailed } = await fetchWorkshopRequiredIdsCombined(workshopId);
+      cache.setRequiredIds(workshopId, requiredIds, fetchFailed);
+
+      const missingTitles = requiredIds.filter(id => !cache.has(id) || !cache.get(id)!.title);
+      if (missingTitles.length > 0) {
+        await getWorkshopMetadata(missingTitles, cacheDir, log, "routine", cache);
+      }
+      cache.save();
+    } catch (e) {
+      log?.(`Failed to ensure prerequisites for ${modName}: ${e}`);
+    }
+  }
+
+  applyCachedWorkshopDependencies(mods, cache);
+  applyLauncherModNames(mods, game, log);
+  if (!isNumericWorkshopId(mod.workshopId)) mod.workshopId = workshopId;
 }
 
 /**

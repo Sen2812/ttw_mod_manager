@@ -58,9 +58,19 @@ function decodeWorkshopHtmlEntities(value: string): string {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
+/** Extract workshop item IDs linked in free text (description, HTML body). */
+export function parseWorkshopIdsFromText(text: string, selfId?: string): string[] {
+  const ids = new Set<string>();
+  for (const m of text.matchAll(/filedetails(?:\/changelog\/|\/?\?id=)(\d{5,15})/gi)) {
+    ids.add(m[1]);
+  }
+  if (selfId) ids.delete(selfId);
+  return [...ids];
+}
+
 /** Parse Required Items section from a workshop filedetails HTML page. */
 export function parseRequiredWorkshopIds(html: string, selfId?: string): string[] {
-  const ids = new Set<string>();
+  const ids = new Set(parseWorkshopIdsFromText(html, selfId));
 
   // Legacy layout: <div id="RequiredItems">…</div>
   const requiredBlock = html.match(/id="RequiredItems"[\s\S]*?(?=<\/div>\s*<\/div>|<div id=")/i);
@@ -122,6 +132,102 @@ export async function fetchWorkshopHtml(workshopId: string): Promise<string> {
 export async function fetchWorkshopRequiredIds(workshopId: string): Promise<string[]> {
   const html = await fetchWorkshopHtml(workshopId);
   return parseRequiredWorkshopIds(html, workshopId);
+}
+
+/** Fetch a single workshop item via the public Steam Web API (no key required). */
+async function fetchPublishedFileDetails(
+  workshopId: string,
+  extraParams: Record<string, string> = {},
+): Promise<Record<string, unknown> | undefined> {
+  const formData = new URLSearchParams();
+  formData.append("itemcount", "1");
+  formData.append("publishedfileids[0]", workshopId);
+  for (const [key, value] of Object.entries(extraParams)) {
+    formData.append(key, value);
+  }
+
+  const postData = formData.toString();
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: "api.steampowered.com",
+        path: "/ISteamRemoteStorage/GetPublishedFileDetails/v1/",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": Buffer.byteLength(postData),
+        },
+      },
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk; });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(body);
+            resolve(parsed?.response?.publishedfiledetails?.[0]);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+function parseChildrenFromApiItem(item: Record<string, unknown>, selfId: string): string[] {
+  const children = item.children;
+  if (!Array.isArray(children)) return [];
+  const ids: string[] = [];
+  for (const child of children) {
+    const id = (child as { publishedfileid?: string })?.publishedfileid;
+    if (id && id !== selfId) ids.push(id);
+  }
+  return ids;
+}
+
+/** Parse prerequisite IDs from the Steam API description (common for WH3 mods). */
+export async function fetchRequiredIdsFromApiDescription(workshopId: string): Promise<string[]> {
+  const item = await fetchPublishedFileDetails(workshopId);
+  if (!item || (item.result as number | undefined) !== 1) return [];
+  const description = typeof item.description === "string" ? item.description : "";
+  return parseWorkshopIdsFromText(description, workshopId);
+}
+
+/** Merge Required Items HTML, API description links, and optional API children. */
+export async function fetchWorkshopRequiredIdsCombined(workshopId: string): Promise<{
+  requiredIds: string[];
+  fetchFailed: boolean;
+}> {
+  let htmlOk = false;
+  let apiOk = false;
+  const ids = new Set<string>();
+
+  try {
+    for (const id of await fetchWorkshopRequiredIds(workshopId)) ids.add(id);
+    htmlOk = true;
+  } catch {
+    // HTML scrape may fail behind restrictive networks; API fallback still useful.
+  }
+
+  try {
+    const item = await fetchPublishedFileDetails(workshopId, { return_children: "true" });
+    if (item && (item.result as number | undefined) === 1) {
+      apiOk = true;
+      const description = typeof item.description === "string" ? item.description : "";
+      for (const id of parseWorkshopIdsFromText(description, workshopId)) ids.add(id);
+      for (const id of parseChildrenFromApiItem(item, workshopId)) ids.add(id);
+    }
+  } catch {
+    // ignore
+  }
+
+  return {
+    requiredIds: [...ids],
+    fetchFailed: !htmlOk && !apiOk,
+  };
 }
 
 export function sleep(ms: number): Promise<void> {

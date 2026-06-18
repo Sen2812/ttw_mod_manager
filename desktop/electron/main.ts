@@ -250,8 +250,18 @@ function registerIpc() {
     void runDeferredWorkshopEnrichment();
     return { mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
   });
-  ipcMain.handle("toggle-mod", (_e, n: string) => { mm.toggleMod(n); return mm.getMods(); });
-  ipcMain.handle("enable-mod", (_e, n: string) => { mm.enableMod(n); return mm.getMods(); });
+  ipcMain.handle("toggle-mod", async (_e, n: string) => {
+    const mod = mm.getMods().find(m => m.name === n);
+    const enabling = mod && !mod.isEnabled;
+    mm.toggleMod(n);
+    if (enabling) await mm.ensureModPrerequisites(n);
+    return mm.getMods();
+  });
+  ipcMain.handle("enable-mod", async (_e, n: string) => {
+    mm.enableMod(n);
+    await mm.ensureModPrerequisites(n);
+    return mm.getMods();
+  });
   ipcMain.handle("disable-mod", (_e, n: string) => { mm.disableMod(n); return mm.getMods(); });
   ipcMain.handle("enable-all", () => { mm.enableAll(); return mm.getMods(); });
   ipcMain.handle("disable-all", () => { mm.disableAll(); return mm.getMods(); });

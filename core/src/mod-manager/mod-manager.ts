@@ -10,7 +10,7 @@ import * as path from "path";
 import { GameDefinition, GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
 import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
-import { scanMods, enrichWorkshopNetwork, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, findSteamPath, type ScanModsOptions } from "./mod-discovery";
+import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, findSteamPath, type ScanModsOptions } from "./mod-discovery";
 import {
   forceWorkshopModUpdate,
 } from "./workshop-update";
@@ -460,6 +460,19 @@ export class ModManager {
   /** Get mods sorted and filtered */
   getFilteredMods(filter: string, includeAuthor = false): Mod[] {
     return filterMods(this.mods, filter, includeAuthor);
+  }
+
+  /** Fetch workshop prerequisites for one mod and merge into the mod list. */
+  async ensureModPrerequisites(modName: string): Promise<void> {
+    if (!this.currentGame) return;
+    await ensureModPrerequisitesForMod(
+      this.mods,
+      modName,
+      this.currentGame,
+      this.configDir,
+      this.subscribedWorkshopIds,
+      this.log,
+    );
   }
 
   /** Toggle a mod's enabled state */

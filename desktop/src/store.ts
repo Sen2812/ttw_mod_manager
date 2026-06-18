@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ModDependencyReport } from "@core/mod-manager/dependency-checker";
 import type { Mod, Preset, GameInfo, OverwriteAnalysis, ModConflictStats } from "./types";
 
 interface AppState {
@@ -18,6 +19,8 @@ interface AppState {
   subscribedWorkshopIds: string[];
   dependencyFocusMod: string | null;
   showDependencyModal: boolean;
+  /** 批量必须 mod 告警（勾选/导入/切换 Profile 后） */
+  dependencyAlertReports: ModDependencyReport[] | null;
   /** 已知分类列表（含自定义） */
   categories: string[];
   categoryFilter: string | null;
@@ -39,6 +42,8 @@ interface AppState {
   refreshOverwriteStats: (opts?: { full?: boolean }) => Promise<void>;
   openDependencyModal: (modName: string) => void;
   closeDependencyModal: () => void;
+  openDependencyAlert: (reports: ModDependencyReport[]) => void;
+  closeDependencyAlert: () => void;
   setCategories: (categories: string[]) => void;
   setCategoryFilter: (category: string | null) => void;
   openUpdateModal: (modName: string) => void;
@@ -57,6 +62,7 @@ export const useStore = create<AppState>((set, get) => ({
   compatFocusMod: null, overwriteStats: null, overwriteAnalysis: null,
   originalMods: [], subscribedWorkshopIds: [],
   dependencyFocusMod: null, showDependencyModal: false,
+  dependencyAlertReports: null,
   categories: [], categoryFilter: null,
   updateFocusMod: null, showUpdateModal: false, isCheckingUpdates: false,
   setMods: (mods) => set({ mods }),
@@ -89,6 +95,10 @@ export const useStore = create<AppState>((set, get) => ({
   },
   openDependencyModal: (modName) => set({ showDependencyModal: true, dependencyFocusMod: modName }),
   closeDependencyModal: () => set({ showDependencyModal: false, dependencyFocusMod: null }),
+  openDependencyAlert: (reports) => set({
+    dependencyAlertReports: reports.length > 0 ? reports : null,
+  }),
+  closeDependencyAlert: () => set({ dependencyAlertReports: null }),
   setCategories: (categories) => set({ categories }),
   setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
   openUpdateModal: (modName) => set({ showUpdateModal: true, updateFocusMod: modName }),

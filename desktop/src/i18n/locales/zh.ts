@@ -18,6 +18,7 @@ export const zh: Record<string, string> = {
   "common.loading": "加载中...",
   "common.unknown": "未知",
   "common.default": "Default",
+  "common.gotIt": "知道了",
 
   // ─── 顶栏 ────────────────────────────────────────────────────────────
   "topbar.title": "Mod 管理器",
@@ -78,7 +79,7 @@ export const zh: Record<string, string> = {
   "modlist.overwritesBadge": "{n} 覆盖",
   "modlist.overwritesTooltip": "{n} 个 mod 存在文件冲突，共 {m} 个文件被覆盖。点击查看全局详情",
   "modlist.rowOverwriteTooltip": "覆盖情况：胜出 {wins} 个文件，被覆盖 {losses} 个文件。点击查看详情",
-  "modlist.dependencyTooltip": "{n} 个前置需求未满足。点击查看详情",
+  "modlist.dependencyTooltip": "{n} 个必须 mod 未满足。点击查看详情",
   "modlist.updateTooltip": "工坊有更新可用。点击查看详情",
 
   // ─── Mod 分类 ────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export const zh: Record<string, string> = {
   "moddetail.lastModified": "最后修改",
   "moddetail.subscribed": "订阅时间",
   "moddetail.dependencies": "依赖项",
-  "moddetail.workshopPrerequisites": "工坊前置需求",
+  "moddetail.workshopPrerequisites": "工坊必须 mod",
   "moddetail.tags": "标签",
   "moddetail.noPreview": "无预览图",
   "moddetail.openWorkshop": "打开工坊",
@@ -178,16 +179,30 @@ export const zh: Record<string, string> = {
   "compat.overriddenByMod": "被覆盖：{mod}",
   "compat.thisMod": "当前 mod",
   "compat.modRelationFiles": "{count} 个文件",
+  "compat.moveAbove": "移到上方",
+  "compat.moveBelow": "移到下方",
+  "compat.moveAboveHint": "让 {mod} 优先加载（覆盖当前 mod）",
+  "compat.moveBelowHint": "让当前 mod 优先加载（覆盖 {mod}）",
+  "compat.categoryBadge": "{cat} {n}",
 
-  // ─── Mod 前置需求 ────────────────────────────────────────────────────
-  "dependency.modalSubtitle": "{n} 个前置需求未满足",
-  "dependency.allSatisfied": "所有前置需求均已满足",
+  // ─── Mod 必须 mod ────────────────────────────────────────────────────
+  "dependency.modalSubtitle": "{n} 个必须 mod 未满足",
+  "dependency.allSatisfied": "所有必须 mod 均已满足",
   "dependency.openWorkshop": "在 Steam 创意工坊打开",
   "dependency.installedAs": "已安装为 {name}",
+  "dependency.alertTitle": "缺少必须 mod",
+  "dependency.alertSubtitle": "以下 mod 已启用，但仍有必须 mod 未满足",
+  "dependency.missingRequiredList": "缺少的必须 mod：",
   "dependency.status.not_enabled": "未启用",
   "dependency.status.not_downloaded": "已订阅但未下载",
   "dependency.status.not_subscribed": "未订阅",
   "dependency.status.ok": "已满足",
+  "dependency.action.enable": "启用",
+  "dependency.action.enabling": "启用中…",
+  "dependency.action.subscribe": "去订阅",
+  "dependency.action.download": "去下载",
+  "dependency.action.notInstalled": "未安装",
+  "dependency.action.opening": "打开中…",
 
   // ─── 工坊更新 ────────────────────────────────────────────────────────
   "update.title": "工坊更新",

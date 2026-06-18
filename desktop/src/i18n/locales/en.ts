@@ -18,6 +18,7 @@ export const en: Record<string, string> = {
   "common.loading": "Loading...",
   "common.unknown": "Unknown",
   "common.default": "Default",
+  "common.gotIt": "Got it",
 
   // ─── Top Bar ─────────────────────────────────────────────────────────
   "topbar.title": "Mod Manager",
@@ -78,7 +79,7 @@ export const en: Record<string, string> = {
   "modlist.overwritesBadge": "{n} overwrites",
   "modlist.overwritesTooltip": "{n} mods have file conflicts, {m} files overwritten. Click for global details",
   "modlist.rowOverwriteTooltip": "Overwrites: wins {wins} files, loses {losses} files. Click for details",
-  "modlist.dependencyTooltip": "{n} unsatisfied prerequisites. Click for details",
+  "modlist.dependencyTooltip": "{n} required mod(s) missing. Click for details",
   "modlist.updateTooltip": "Workshop update available. Click for details",
 
   // ─── Mod Categories ──────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export const en: Record<string, string> = {
   "moddetail.lastModified": "Last Modified",
   "moddetail.subscribed": "Subscribed",
   "moddetail.dependencies": "Dependencies",
-  "moddetail.workshopPrerequisites": "Workshop Prerequisites",
+  "moddetail.workshopPrerequisites": "Workshop Required Mods",
   "moddetail.tags": "Tags",
   "moddetail.noPreview": "No Preview",
   "moddetail.openWorkshop": "Open Workshop",
@@ -178,16 +179,30 @@ export const en: Record<string, string> = {
   "compat.overriddenByMod": "Overridden by: {mod}",
   "compat.thisMod": "this mod",
   "compat.modRelationFiles": "{count} files",
+  "compat.moveAbove": "Move above",
+  "compat.moveBelow": "Move below",
+  "compat.moveAboveHint": "Load {mod} later (override this mod)",
+  "compat.moveBelowHint": "Load this mod later (override {mod})",
+  "compat.categoryBadge": "{cat} {n}",
 
-  // ─── Mod Dependencies ────────────────────────────────────────────────
-  "dependency.modalSubtitle": "{n} unsatisfied prerequisites",
-  "dependency.allSatisfied": "All prerequisites are satisfied",
+  // ─── Required Mods ───────────────────────────────────────────────────
+  "dependency.modalSubtitle": "{n} required mod(s) missing",
+  "dependency.allSatisfied": "All required mods are satisfied",
   "dependency.openWorkshop": "Open in Steam Workshop",
   "dependency.installedAs": "Installed as {name}",
+  "dependency.alertTitle": "Required mods missing",
+  "dependency.alertSubtitle": "These enabled mods still have unsatisfied required mods",
+  "dependency.missingRequiredList": "Missing required mods:",
   "dependency.status.not_enabled": "Not enabled",
   "dependency.status.not_downloaded": "Subscribed but not downloaded",
   "dependency.status.not_subscribed": "Not subscribed",
   "dependency.status.ok": "OK",
+  "dependency.action.enable": "Enable",
+  "dependency.action.enabling": "Enabling…",
+  "dependency.action.subscribe": "Subscribe",
+  "dependency.action.download": "Download",
+  "dependency.action.notInstalled": "Not installed",
+  "dependency.action.opening": "Opening…",
 
   // ─── Workshop Updates ──────────────────────────────────────────────
   "update.title": "Workshop Update",

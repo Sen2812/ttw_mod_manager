@@ -47,8 +47,8 @@ function modByWorkshopId(mods: Mod[], workshopId: string): Mod | undefined {
 }
 
 function modByPackName(mods: Mod[], packName: string): Mod | undefined {
-  const lower = packName.toLowerCase();
-  return mods.find(m => m.name.toLowerCase() === lower);
+  const key = packName.toLowerCase().replace(/\.pack$/i, "");
+  return mods.find(m => m.name.toLowerCase().replace(/\.pack$/i, "") === key);
 }
 
 function workshopDisplayName(
@@ -141,4 +141,29 @@ export function getEnabledModDependencyReports(ctx: DependencyCheckContext): Rec
     reports[mod.name] = { modName: mod.name, issues, hasIssues: true };
   }
   return reports;
+}
+
+/** Installed mod pack names that can be enabled to satisfy prerequisites. */
+export function collectEnableablePrerequisiteModNames(issues: DependencyIssue[]): string[] {
+  const names = new Set<string>();
+  for (const issue of issues) {
+    if (issue.status === "not_enabled" && issue.matchedModName) {
+      names.add(issue.matchedModName);
+    }
+  }
+  return [...names];
+}
+
+/** Union of enableable prerequisites across multiple mod reports. */
+export function collectAllEnableablePrerequisites(
+  reports: Record<string, ModDependencyReport> | ModDependencyReport[],
+): string[] {
+  const names = new Set<string>();
+  const list = Array.isArray(reports) ? reports : Object.values(reports);
+  for (const report of list) {
+    for (const name of collectEnableablePrerequisiteModNames(report.issues)) {
+      names.add(name);
+    }
+  }
+  return [...names];
 }

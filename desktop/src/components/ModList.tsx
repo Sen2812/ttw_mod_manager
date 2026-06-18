@@ -17,6 +17,7 @@ import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
 import { getModDisplayName, hasWorkshopDisplayName } from "@core/mod-manager/mod-display";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
+import { getModDependencyReport } from "../utils/dependency-actions";
 
 // ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
 
@@ -182,6 +183,7 @@ export default function ModList() {
   const markDirty = useStore(s => s.markDirty);
   const openCompatPanel = useStore(s => s.openCompatPanel);
   const openDependencyModal = useStore(s => s.openDependencyModal);
+  const openDependencyAlert = useStore(s => s.openDependencyAlert);
   const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
   const categories = useStore(s => s.categories);
   const setCategories = useStore(s => s.setCategories);
@@ -245,16 +247,24 @@ export default function ModList() {
 
   // 稳定的回调，避免 memo 化的 ModRow 因 props 变化而重渲染
   const handleToggle = useCallback(async (mod: Mod) => {
+    const wasEnabled = mod.isEnabled;
     try {
       const result = await window.api.toggleMod(mod.name);
       if (Array.isArray(result)) {
         setMods(result);
         markDirty();
+        if (!wasEnabled) {
+          const updated = result.find(m => m.name === mod.name);
+          if (updated?.isEnabled) {
+            const report = getModDependencyReport(updated, result, subscribedWorkshopIds);
+            if (report) openDependencyAlert([report]);
+          }
+        }
       }
     } catch (e) {
       console.error("Failed to toggle mod:", e);
     }
-  }, [setMods, markDirty]);
+  }, [setMods, markDirty, subscribedWorkshopIds, openDependencyAlert]);
 
   const handleShowDetail = useCallback((mod: Mod) => {
     setSelectedMod(mod);

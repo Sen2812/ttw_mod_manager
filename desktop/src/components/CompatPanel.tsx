@@ -8,6 +8,12 @@ import {
 import clsx from "clsx";
 import type { FileConflict, Mod, ModRelation } from "../types";
 import { getModDisplayName } from "@core/mod-manager/mod-display";
+import { reorderModRelative } from "../utils/load-order";
+import {
+  countSharedConflictCategories,
+  DISPLAY_CATEGORIES,
+  type CompatCategory,
+} from "../utils/compat-categories";
 
 const CATEGORY_COLORS: Record<FileConflict["category"], string> = {
   db: "text-morandi-accent",
@@ -39,6 +45,8 @@ export default function CompatPanel() {
   const analysis = useStore(s => s.overwriteAnalysis);
   const stats = useStore(s => focusMod ? s.overwriteStats?.[focusMod] : undefined);
   const mods = useStore(s => s.mods);
+  const setMods = useStore(s => s.setMods);
+  const markDirty = useStore(s => s.markDirty);
   const refreshOverwriteStats = useStore(s => s.refreshOverwriteStats);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -99,6 +107,24 @@ export default function CompatPanel() {
       return next;
     });
   };
+
+  const handleReorder = useCallback(async (otherMod: string, position: "above" | "below") => {
+    if (!focusMod) return;
+    const names = reorderModRelative(mods, focusMod, otherMod, position);
+    try {
+      const result = await window.api.applyDragOrder(names);
+      if (Array.isArray(result)) {
+        setMods(result);
+        markDirty();
+        setIsLoading(true);
+        await refreshOverwriteStats({ full: true });
+      }
+    } catch (e) {
+      console.error("Failed to reorder mods:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [focusMod, mods, setMods, markDirty, refreshOverwriteStats]);
 
   if (!showCompatPanel || !focusMod) return null;
 
@@ -172,12 +198,14 @@ export default function CompatPanel() {
                 relations={overwrites.filter(filterRelation)}
                 totalRelationCount={overwrites.length}
                 files={winFiles.filter(filterFn)}
+                allFiles={winFiles}
                 totalFileCount={winFiles.length}
                 focusMod={focusMod}
                 mods={mods}
                 expanded={expanded}
                 onToggleExpand={toggleExpand}
                 emptyText={t("compat.noOverwrites")}
+                onReorder={handleReorder}
               />
               <ConflictSection
                 title={t("compat.overwrittenBySection", { n: lossFiles.length })}
@@ -185,12 +213,14 @@ export default function CompatPanel() {
                 relations={overwrittenBy.filter(filterRelation)}
                 totalRelationCount={overwrittenBy.length}
                 files={lossFiles.filter(filterFn)}
+                allFiles={lossFiles}
                 totalFileCount={lossFiles.length}
                 focusMod={focusMod}
                 mods={mods}
                 expanded={expanded}
                 onToggleExpand={toggleExpand}
                 emptyText={t("compat.noOverwrittenBy")}
+                onReorder={handleReorder}
               />
             </>
           )}
@@ -201,18 +231,20 @@ export default function CompatPanel() {
 }
 
 /** 一个分区：mod 关系摘要 + 文件详情列表 */
-function ConflictSection({ title, accent, relations, totalRelationCount, files, totalFileCount, focusMod, mods, expanded, onToggleExpand, emptyText }: {
+function ConflictSection({ title, accent, relations, totalRelationCount, files, allFiles, totalFileCount, focusMod, mods, expanded, onToggleExpand, emptyText, onReorder }: {
   title: string;
   accent: "win" | "lose";
   relations: ModRelation[];
   totalRelationCount: number;
   files: FileConflict[];
+  allFiles: FileConflict[];
   totalFileCount: number;
   focusMod: string;
   mods: Mod[];
   expanded: Set<string>;
   onToggleExpand: (key: string) => void;
   emptyText: string;
+  onReorder: (otherMod: string, position: "above" | "below") => void;
 }) {
   const t = useT();
   const filteredOut = (totalRelationCount - relations.length) + (totalFileCount - files.length);
@@ -243,20 +275,15 @@ function ConflictSection({ title, accent, relations, totalRelationCount, files, 
             <div className="px-4 py-2 border-b border-morandi-border-light bg-morandi-page/30">
               <div className="space-y-1">
                 {relations.map(r => (
-                  <div key={r.modName} className="flex items-center gap-2 text-xs">
-                    {accent === "win"
-                      ? <Trophy className="w-3 h-3 text-morandi-success shrink-0" />
-                      : <AlertTriangle className="w-3 h-3 text-morandi-danger shrink-0" />}
-                    <span className="flex-1 truncate text-morandi-text" title={r.modName}>
-                      {modDisplayName(mods, r.modName)}
-                    </span>
-                    <span className="text-[10px] text-morandi-text-muted shrink-0 font-mono" title={r.modName}>
-                      {short(r.modName)}
-                    </span>
-                    <span className="text-[10px] text-morandi-text-secondary shrink-0">
-                      {t("compat.modRelationFiles", { count: r.fileCount })}
-                    </span>
-                  </div>
+                  <RelationRow
+                    key={r.modName}
+                    relation={r}
+                    accent={accent}
+                    focusMod={focusMod}
+                    mods={mods}
+                    categoryCounts={countSharedConflictCategories(allFiles, focusMod, r.modName)}
+                    onReorder={onReorder}
+                  />
                 ))}
               </div>
             </div>
@@ -271,6 +298,71 @@ function ConflictSection({ title, accent, relations, totalRelationCount, files, 
           ))}
         </>
       )}
+    </div>
+  );
+}
+
+function RelationRow({ relation, accent, focusMod, mods, categoryCounts, onReorder }: {
+  relation: ModRelation;
+  accent: "win" | "lose";
+  focusMod: string;
+  mods: Mod[];
+  categoryCounts: Record<CompatCategory, number>;
+  onReorder: (otherMod: string, position: "above" | "below") => void;
+}) {
+  const t = useT();
+  const otherName = modDisplayName(mods, relation.modName);
+  const reorderPosition = accent === "win" ? "above" as const : "below" as const;
+  const reorderHint = accent === "win"
+    ? t("compat.moveAboveHint", { mod: otherName })
+    : t("compat.moveBelowHint", { mod: otherName });
+
+  return (
+    <div className="rounded-md border border-morandi-border-light/80 px-2.5 py-2 bg-morandi-page/50">
+      <div className="flex items-start gap-2">
+        {accent === "win"
+          ? <Trophy className="w-3.5 h-3.5 text-morandi-success shrink-0 mt-0.5" />
+          : <AlertTriangle className="w-3.5 h-3.5 text-morandi-danger shrink-0 mt-0.5" />}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-morandi-text truncate" title={relation.modName}>
+              {otherName}
+            </span>
+            <span className="text-[10px] text-morandi-text-secondary shrink-0">
+              {t("compat.modRelationFiles", { count: relation.fileCount })}
+            </span>
+          </div>
+          <CategoryBadges counts={categoryCounts} />
+        </div>
+        <button
+          type="button"
+          title={reorderHint}
+          onClick={() => onReorder(relation.modName, reorderPosition)}
+          className="btn-morandi-ghost text-[10px] shrink-0 px-2 py-1">
+          {accent === "win" ? t("compat.moveAbove") : t("compat.moveBelow")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CategoryBadges({ counts }: { counts: Record<CompatCategory, number> }) {
+  const t = useT();
+  const visible = DISPLAY_CATEGORIES.filter(cat => counts[cat] > 0);
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {visible.map(cat => (
+        <span key={cat}
+          className={clsx(
+            "text-[9px] font-medium uppercase px-1.5 py-0.5 rounded",
+            cat === "db" && "bg-morandi-accent/10 text-morandi-accent",
+            cat === "script" && "bg-morandi-success/10 text-morandi-success",
+            cat === "loc" && "bg-morandi-text-secondary/10 text-morandi-text-secondary",
+          )}>
+          {t("compat.categoryBadge", { cat: t(`compat.category.${cat}`), n: counts[cat] })}
+        </span>
+      ))}
     </div>
   );
 }

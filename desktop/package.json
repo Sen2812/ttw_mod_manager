@@ -8,10 +8,15 @@
   "engines": {
     "node": ">=24"
   },
+  "allowScripts": {
+    "electron": true,
+    "electron-winstaller": true
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && tsc -p tsconfig.node.json",
     "preview": "vite preview",
+    "postinstall": "node ./node_modules/electron/install.js",
     "dist": "npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --win --dir"
   },
