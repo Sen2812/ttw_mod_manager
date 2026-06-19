@@ -10,7 +10,7 @@ import * as path from "path";
 import { GameDefinition, GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
 import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
-import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, findSteamPath, type ScanModsOptions } from "./mod-discovery";
+import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, type ScanModsOptions } from "./mod-discovery";
 import {
   forceWorkshopModUpdate,
 } from "./workshop-update";
@@ -178,10 +178,26 @@ export class ModManager {
   async scanMods(options: ScanModsOptions = {}): Promise<Mod[]> {
     if (!this.currentGame) throw new Error("No game selected");
 
-    const result = await scanMods(this.currentGame, this.folderPaths, this.configDir, this.log, options);
+    const pendingToPreserve = options.skipSteamSubscriptionFetch
+      ? this.mods.filter(m => m.pendingDownload && m.workshopId && !m.isInData)
+      : [];
+    const preserveWorkshopMods = [
+      ...(options.preserveWorkshopMods ?? []),
+      ...pendingToPreserve,
+    ];
+
+    const result = await scanMods(
+      this.currentGame,
+      this.folderPaths,
+      this.configDir,
+      this.log,
+      { ...options, preserveWorkshopMods },
+    );
     this.mods = result.mods;
     this.vanillaPacks = result.vanillaPacks;
-    this.subscribedWorkshopIds = result.subscribedWorkshopIds;
+    if (!options.skipSteamSubscriptionFetch) {
+      this.subscribedWorkshopIds = result.subscribedWorkshopIds;
+    }
 
     // Create default preset from initial scan
     this.defaultPreset = {
@@ -255,9 +271,15 @@ export class ModManager {
   /** Apply a preset's state to the current mods */
   private applyPresetToMods(preset: Preset): void {
     const presetByName = new Map(preset.mods.map((m) => [m.name, m]));
-    
+    const presetByWorkshopId = new Map(
+      preset.mods
+        .filter((m) => m.workshopId && /^\d{5,15}$/.test(m.workshopId))
+        .map((m) => [m.workshopId, m]),
+    );
+
     for (const mod of this.mods) {
-      const presetMod = presetByName.get(mod.name);
+      const presetMod = presetByName.get(mod.name)
+        ?? (mod.workshopId ? presetByWorkshopId.get(mod.workshopId) : undefined);
       if (presetMod) {
         mod.isEnabled = presetMod.isEnabled;
         mod.loadOrder = presetMod.loadOrder;
@@ -479,6 +501,7 @@ export class ModManager {
   toggleMod(modName: string): boolean {
     const mod = this.mods.find((m) => m.name === modName);
     if (!mod) return false;
+    if (mod.pendingDownload && !mod.isEnabled) return false;
     mod.isEnabled = !mod.isEnabled;
     return mod.isEnabled;
   }
@@ -487,7 +510,7 @@ export class ModManager {
   enableMod(modName: string): void {
     const mod = this.mods.find((m) => m.name === modName);
     if (!mod) return;
-    
+    if (mod.pendingDownload) return;
     // Check dependencies
     const missingDeps = this.checkDependencies(mod);
     if (missingDeps.length > 0) {
@@ -632,15 +655,20 @@ export class ModManager {
       return { ok: false, error: "NO_CONTENT_FOLDER" };
     }
 
-    const steamPath = await findSteamPath();
     const result = await forceWorkshopModUpdate({
       contentFolder: this.folderPaths.contentFolder,
       workshopId: mod.workshopId,
-      steamPath,
     });
 
     if (result.ok) {
-      await this.scanMods({ deferNetwork: false });
+      const snapshot: Mod = {
+        ...mod,
+        tags: [...mod.tags],
+        reqModIds: mod.reqModIds ? [...mod.reqModIds] : undefined,
+        reqModIdToName: mod.reqModIdToName?.map(([id, name]) => [id, name] as [string, string]),
+        categories: mod.categories ? [...mod.categories] : undefined,
+      };
+      await this.scanMods({ deferNetwork: false, preserveWorkshopMods: [snapshot] });
     }
     return result;
   }

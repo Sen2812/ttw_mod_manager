@@ -72,6 +72,7 @@ export default function ModUpdateModal() {
               <p className={clsx(
                 "text-xs mt-0.5 font-medium",
                 status === "outdated" && "text-morandi-warning",
+                status === "downloading" && "text-morandi-accent",
                 status === "ok" && "text-morandi-success",
                 status === "unknown" && "text-morandi-text-muted",
               )}>
@@ -86,6 +87,11 @@ export default function ModUpdateModal() {
           <div className="px-5 py-4 space-y-3">
             <VersionRow label={t("update.localVersion")} value={formatDate(mod.lastChangedLocal)} />
             <VersionRow label={t("update.workshopVersion")} value={formatDate(mod.lastChanged)} />
+            {status === "downloading" && (
+              <p className="text-xs text-morandi-text-secondary bg-morandi-accent-light/30 rounded-lg px-3 py-2">
+                {t("update.status.downloading")}
+              </p>
+            )}
             {status === "outdated" && (
               <p className="text-xs text-morandi-text-secondary bg-morandi-warning-light/30 rounded-lg px-3 py-2">
                 {t("update.outdatedHint")}

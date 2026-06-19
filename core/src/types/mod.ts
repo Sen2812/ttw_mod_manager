@@ -54,6 +54,11 @@ export interface Mod {
   tags: string[];
   /** Custom user-assigned tags */
   customTags?: string[];
+  /** Subscribed but local .pack not present (e.g. re-downloading after force update). */
+  pendingDownload?: boolean;
+  /** Steam workshop download bytes (when pendingDownload). */
+  downloadBytesCurrent?: number;
+  downloadBytesTotal?: number;
 }
 
 export interface MergedModsData {

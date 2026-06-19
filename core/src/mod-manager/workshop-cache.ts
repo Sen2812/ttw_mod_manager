@@ -42,6 +42,8 @@ export interface WorkshopItemData {
   requiredIdsFetchFailed?: boolean;
   /** When timeUpdated was last fetched from the Steam Web API. */
   timeUpdatedFetchedAt?: number;
+  /** Steam consumer app ID from metadata API (e.g. 1142710 for WH3). */
+  consumerAppId?: number;
 }
 
 export type WorkshopFetchMode = "routine" | "refresh";

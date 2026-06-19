@@ -13,7 +13,9 @@ import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
-import { fetchWorkshopDependenciesViaSteam } from "./steam-client";
+import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
+import { fetchWorkshopDependenciesViaSteam, fetchSubscribedWorkshopIdsViaSteam, triggerWorkshopDownloadsViaSteam, getWorkshopItemStatusesViaSteam } from "./steam-client";
+import { getSteamClientStatus } from "./steam-status";
 
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
@@ -122,10 +124,192 @@ function runModPrerequisitesCheck(modName: string): void {
   })();
 }
 
+function getCurrentSteamAppId(): number | undefined {
+  const game = BUILTIN_GAMES.find(g => g.id === mm.config?.currentGame);
+  const appId = Number(game?.steamId);
+  return appId || undefined;
+}
+
+let pendingDownloadPollTimer: ReturnType<typeof setInterval> | null = null;
+/** Workshop IDs with an active download request — never re-trigger until pack appears or force-update. */
+const pendingDownloadLocked = new Set<string>();
+let syncPendingInFlight: Promise<void> | null = null;
+let deferredWorkshopRunning = false;
+let lastDownloadProgressRefresh = 0;
+const PENDING_POLL_MS = 15_000;
+const DOWNLOAD_PROGRESS_REFRESH_MS = 60_000;
+
+function lockPendingDownload(workshopId: string): void {
+  pendingDownloadLocked.add(workshopId);
+}
+
+function unlockPendingDownload(workshopId: string): void {
+  pendingDownloadLocked.delete(workshopId);
+}
+
+function workshopFolderHasPack(contentFolder: string, workshopId: string): boolean {
+  const folder = path.join(contentFolder, workshopId);
+  if (!fs.existsSync(folder)) return false;
+  try {
+    return fs.readdirSync(folder).some(name => name.endsWith(".pack"));
+  } catch {
+    return false;
+  }
+}
+
+const scanWhileDownloadingOpts = {
+  deferNetwork: true as const,
+  skipSteamSubscriptionFetch: true as const,
+};
+
+function stopPendingDownloadPoll(): void {
+  if (pendingDownloadPollTimer) {
+    clearInterval(pendingDownloadPollTimer);
+    pendingDownloadPollTimer = null;
+  }
+}
+
+async function applyPendingDownloadStatus(mods: Mod[]): Promise<Mod[]> {
+  const appId = getCurrentSteamAppId();
+  if (!appId) return mods;
+  const pending = mods.filter(m => m.pendingDownload && m.workshopId);
+  if (pending.length === 0) return mods;
+
+  try {
+    const statuses = await getWorkshopItemStatusesViaSteam(
+      appId,
+      pending.map(m => m.workshopId),
+    );
+    return mods.map(m => {
+      if (!m.pendingDownload || !m.workshopId) return m;
+      const st = statuses.get(m.workshopId);
+      if (!st) return m;
+      return {
+        ...m,
+        downloadBytesCurrent: st.downloadCurrent,
+        downloadBytesTotal: st.downloadTotal,
+      };
+    });
+  } catch {
+    return mods;
+  }
+}
+
+async function syncPendingWorkshopDownloads(forceIds?: string[]): Promise<void> {
+  if (syncPendingInFlight) return syncPendingInFlight;
+  syncPendingInFlight = syncPendingWorkshopDownloadsInner(forceIds).finally(() => {
+    syncPendingInFlight = null;
+  });
+  return syncPendingInFlight;
+}
+
+async function syncPendingWorkshopDownloadsInner(forceIds?: string[]): Promise<void> {
+  await ensureInit();
+  const appId = getCurrentSteamAppId();
+  if (!appId) return;
+
+  const pending = mm.getMods().filter(m =>
+    m.pendingDownload && m.workshopId && !m.isInData
+    && mm.subscribedWorkshopIds.includes(m.workshopId),
+  );
+  if (pending.length === 0) {
+    stopPendingDownloadPoll();
+    return;
+  }
+
+  const ids = pending.map(m => m.workshopId);
+  const forceSet = new Set(forceIds ?? []);
+
+  for (const id of forceSet) unlockPendingDownload(id);
+
+  const toTrigger = ids.filter(id => {
+    if (pendingDownloadLocked.has(id)) return false;
+    return true;
+  });
+
+  if (toTrigger.length > 0) {
+    for (const id of toTrigger) lockPendingDownload(id);
+    try {
+      const results = await triggerWorkshopDownloadsViaSteam(appId, toTrigger);
+      let ok = 0;
+      for (const [id, result] of results) {
+        if (result.triggered) ok++;
+        else if (result.mode !== "in_progress") {
+          appLog(
+            `Workshop ${id}: download not started (mode=${result.mode ?? "unknown"}, `
+            + `state=${result.state}, folderMissing=${result.folderMissing ?? "?"})`,
+          );
+        }
+      }
+      appLog(`Steam download requested for ${ok}/${toTrigger.length} pending workshop item(s)`);
+    } catch (e) {
+      appLog(`Steam download request failed: ${e}`);
+    }
+  }
+
+  await mm.scanMods(scanWhileDownloadingOpts);
+  mm.mods = await applyPendingDownloadStatus(mm.getMods());
+  notifyModsUpdated();
+  startPendingDownloadPoll();
+}
+
+function startPendingDownloadPoll(): void {
+  if (pendingDownloadPollTimer) return;
+  pendingDownloadPollTimer = setInterval(() => {
+    void pollPendingDownloads();
+  }, PENDING_POLL_MS);
+}
+
+/** Lightweight poll: filesystem for completion; Steam API for progress at most once per minute. */
+async function pollPendingDownloads(): Promise<void> {
+  try {
+    await ensureInit();
+    const pending = mm.getMods().filter(m => m.pendingDownload && m.workshopId);
+    if (pending.length === 0) {
+      stopPendingDownloadPoll();
+      return;
+    }
+
+    const contentFolder = mm.folderPaths?.contentFolder;
+    if (!contentFolder) return;
+
+    let packReady = false;
+    for (const mod of pending) {
+      if (workshopFolderHasPack(contentFolder, mod.workshopId)) {
+        unlockPendingDownload(mod.workshopId);
+        packReady = true;
+      }
+    }
+
+    if (packReady) {
+      await mm.scanMods(scanWhileDownloadingOpts);
+      notifyModsUpdated();
+      if (!mm.getMods().some(m => m.pendingDownload)) {
+        stopPendingDownloadPoll();
+      }
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastDownloadProgressRefresh >= DOWNLOAD_PROGRESS_REFRESH_MS) {
+      lastDownloadProgressRefresh = now;
+      mm.mods = await applyPendingDownloadStatus(mm.getMods());
+      notifyModsUpdated();
+    }
+  } catch (e) {
+    appLog(`Pending download poll failed: ${e}`);
+  }
+}
+
 /** Background workshop metadata sync and update checks after first paint. */
 async function runDeferredWorkshopEnrichment(): Promise<void> {
+  if (deferredWorkshopRunning) return;
+  deferredWorkshopRunning = true;
   const gen = ++deferredWorkshopGeneration;
   try {
+    await syncPendingWorkshopDownloads();
+    if (gen !== deferredWorkshopGeneration) return;
+
     await mm.enrichWorkshopNetwork();
     if (gen !== deferredWorkshopGeneration) return;
     notifyModsUpdated();
@@ -135,6 +319,8 @@ async function runDeferredWorkshopEnrichment(): Promise<void> {
     notifyModsUpdated();
   } catch (e) {
     appLog(`Deferred workshop enrichment failed: ${e}`);
+  } finally {
+    deferredWorkshopRunning = false;
   }
 }
 
@@ -233,6 +419,8 @@ function registerIpc() {
     return buildBootstrapPayload();
   });
 
+  ipcMain.handle("get-steam-status", async () => getSteamClientStatus());
+
   // ── 配置 ─────────────────────────────────────────────────────────────────
   ipcMain.handle("get-config", async () => {
     await ensureInit();
@@ -273,8 +461,7 @@ function registerIpc() {
   ipcMain.handle("get-mods", async () => { await ensureInit(); return mm.getMods(); });
   ipcMain.handle("scan-mods", async () => {
     await ensureInit();
-    await mm.scanMods({ deferNetwork: true });
-    void runDeferredWorkshopEnrichment();
+    await mm.scanMods({ deferNetwork: true, skipSteamSubscriptionFetch: pendingDownloadLocked.size > 0 });
     return { mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
   });
   ipcMain.handle("toggle-mod", (_e, n: string) => {
@@ -326,8 +513,39 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle("force-update-mod", async (_e, modName: string) => {
+    const mod = mm.getMods().find(m => m.name === modName);
     const result = await mm.forceUpdateMod(modName);
+    if (result.ok && mod?.workshopId) {
+      unlockPendingDownload(mod.workshopId);
+      await syncPendingWorkshopDownloads([mod.workshopId]);
+    }
     return { ...result, mods: mm.getMods(), outdatedCount: countOutdatedMods(mm.getMods()) };
+  });
+  ipcMain.handle("trigger-workshop-download", async (_e, workshopId: string) => {
+    await ensureInit();
+    const appId = getCurrentSteamAppId();
+    if (!appId || !/^\d{5,15}$/.test(workshopId)) {
+      return { ok: false, error: "INVALID", mods: mm.getMods() };
+    }
+    try {
+      if (pendingDownloadLocked.has(workshopId)) {
+        mm.mods = await applyPendingDownloadStatus(mm.getMods());
+        startPendingDownloadPoll();
+        notifyModsUpdated();
+        return { ok: true, inProgress: true, mods: mm.getMods() };
+      }
+      unlockPendingDownload(workshopId);
+      lockPendingDownload(workshopId);
+      await triggerWorkshopDownloadsViaSteam(appId, [workshopId]);
+      await mm.scanMods(scanWhileDownloadingOpts);
+      mm.mods = await applyPendingDownloadStatus(mm.getMods());
+      startPendingDownloadPoll();
+      notifyModsUpdated();
+      return { ok: true, mods: mm.getMods() };
+    } catch (e: any) {
+      unlockPendingDownload(workshopId);
+      return { ok: false, error: e?.message ?? String(e), mods: mm.getMods() };
+    }
   });
   ipcMain.handle("force-update-all-outdated", async () => {
     const result = await mm.forceUpdateAllOutdated();
@@ -463,6 +681,7 @@ function registerIpc() {
   ipcMain.handle("set-game", async (_e, g: string) => {
     await ensureInit();
     try {
+      pendingDownloadLocked.clear();
       await mm.setGame(g as SupportedGame);
       void runDeferredWorkshopEnrichment();
       return {
@@ -740,6 +959,12 @@ app.whenReady().then(async () => {
     const appId = Number(game.steamId);
     if (!appId) return new Map();
     return fetchWorkshopDependenciesViaSteam(appId, ids);
+  });
+
+  setWorkshopSubscriptionsFetcher(async (game) => {
+    const appId = Number(game.steamId);
+    if (!appId) return [];
+    return fetchSubscribedWorkshopIdsViaSteam(appId);
   });
 
   mm = new ModManager({ configDir: dataDir, log: msg => appLog(`[core] ${msg}`) });

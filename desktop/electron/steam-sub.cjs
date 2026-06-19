@@ -1,9 +1,16 @@
 /**
- * Child process: query workshop item dependencies via steamworks (GetQueryUGCChildren).
- * argv: [appId, "getDependencies", "id1,id2,..."]
+ * Child process: Steamworks workshop queries (dependencies, subscribe, download).
+ * argv: [appId, command, extraArg?]
  */
+const fs = require("fs");
 const path = require("path");
 const steamworks = require(path.join(__dirname, "..", "steamworks", "index.js"));
+
+const ITEM_SUBSCRIBED = 1;
+const ITEM_INSTALLED = 4;
+const ITEM_NEEDS_UPDATE = 8;
+const ITEM_DOWNLOADING = 16;
+const ITEM_DOWNLOAD_PENDING = 32;
 
 function parseItemIds(raw) {
   return (raw ?? "")
@@ -11,6 +18,20 @@ function parseItemIds(raw) {
     .map((id) => id.trim())
     .filter((id) => id !== "" && /^\d+$/.test(id))
     .map((id) => BigInt(id));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function folderMissingOrEmpty(folder) {
+  if (!folder) return true;
+  try {
+    if (!fs.existsSync(folder)) return true;
+    return !fs.readdirSync(folder).some((name) => name.endsWith(".pack"));
+  } catch {
+    return true;
+  }
 }
 
 function getDependencies(client, ids, cb) {
@@ -40,6 +61,82 @@ function getDependencies(client, ids, cb) {
   });
 }
 
+function readItemStatus(client, id) {
+  const dl = client.workshop.downloadInfo(id);
+  const install = client.workshop.installInfo(id);
+  const installFolder = install?.folder ?? "";
+  return {
+    state: client.workshop.state(id),
+    downloadCurrent: Number(dl?.current ?? 0),
+    downloadTotal: Number(dl?.total ?? 0),
+    installFolder,
+    folderMissing: folderMissingOrEmpty(installFolder),
+  };
+}
+
+/** True while bytes are moving, or Steam is validating/extracting into an empty folder. */
+function isDownloadInProgress(status) {
+  const { state, downloadCurrent, downloadTotal, folderMissing } = status;
+  if (state & ITEM_DOWNLOADING || state & ITEM_DOWNLOAD_PENDING) return true;
+  if (downloadTotal > 0 && downloadCurrent < downloadTotal) return true;
+  if (downloadTotal > 0 && folderMissing) return true;
+  if ((state & ITEM_INSTALLED) && folderMissing) return true;
+  return false;
+}
+
+/**
+ * Trigger workshop download via ISteamUGC#DownloadItem.
+ * If Steam still thinks the item is installed after a manual folder delete,
+ * unsubscribe + resubscribe once to force a fresh download queue entry.
+ */
+async function triggerWorkshopDownload(client, id) {
+  const before = readItemStatus(client, id);
+
+  if (isDownloadInProgress(before)) {
+    return { triggered: true, mode: "in_progress", ...before };
+  }
+
+  let triggered = client.workshop.download(id, false);
+  if (triggered) {
+    await sleep(1500);
+    return { triggered: true, mode: "download", ...readItemStatus(client, id) };
+  }
+
+  const installedButMissing =
+    (before.state & ITEM_INSTALLED) && before.folderMissing;
+  const notSubscribed = !(before.state & ITEM_SUBSCRIBED);
+
+  // Only resubscribe on a cold start (no bytes queued yet). Never during validation.
+  if ((installedButMissing || notSubscribed) && before.downloadTotal === 0 && !isDownloadInProgress(before)) {
+    try {
+      if (before.state & ITEM_SUBSCRIBED) {
+        await client.workshop.unsubscribe(id);
+        await sleep(800);
+      }
+      await client.workshop.subscribe(id);
+      await sleep(2000);
+      triggered = client.workshop.download(id, false);
+      const after = readItemStatus(client, id);
+      return {
+        triggered: triggered || !!(after.state & (ITEM_DOWNLOADING | ITEM_DOWNLOAD_PENDING)),
+        mode: "resubscribed",
+        ...after,
+      };
+    } catch (e) {
+      return { triggered: false, mode: "resubscribe_failed", error: String(e), ...before };
+    }
+  }
+
+  if (before.state & ITEM_NEEDS_UPDATE) {
+    await sleep(1000);
+    triggered = client.workshop.download(id, false);
+    const after = readItemStatus(client, id);
+    return { triggered, mode: "retry_needs_update", ...after };
+  }
+
+  return { triggered: false, mode: "download_rejected", ...before };
+}
+
 const command = process.argv[3];
 if (command === "getDependencies") {
   const appId = Number(process.argv[2]);
@@ -58,4 +155,72 @@ if (command === "getDependencies") {
     }
     setTimeout(() => process.exit(0), 200);
   });
+} else if (command === "getSubscribed") {
+  const appId = Number(process.argv[2]);
+  let client;
+  try {
+    client = steamworks.init(appId);
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+    process.exit(1);
+  }
+
+  try {
+    const ids = client.workshop.getSubscribedItems().map((id) => id.toString());
+    if (process.send) process.send({ ids });
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+  }
+  setTimeout(() => process.exit(0), 200);
+} else if (command === "downloadItems") {
+  const appId = Number(process.argv[2]);
+  const ids = parseItemIds(process.argv[4]);
+  let client;
+  try {
+    client = steamworks.init(appId);
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+    process.exit(1);
+  }
+
+  void (async () => {
+    const results = {};
+    for (const id of ids) {
+      try {
+        results[id.toString()] = await triggerWorkshopDownload(client, id);
+      } catch (e) {
+        results[id.toString()] = { triggered: false, mode: "error", error: String(e) };
+      }
+    }
+    if (process.send) process.send({ results });
+    setTimeout(() => process.exit(0), 500);
+  })();
+} else if (command === "getItemStatus") {
+  const appId = Number(process.argv[2]);
+  const ids = parseItemIds(process.argv[4]);
+  let client;
+  try {
+    client = steamworks.init(appId);
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+    process.exit(1);
+  }
+
+  const results = {};
+  for (const id of ids) {
+    try {
+      results[id.toString()] = readItemStatus(client, id);
+    } catch (e) {
+      results[id.toString()] = {
+        state: 0,
+        downloadCurrent: 0,
+        downloadTotal: 0,
+        installFolder: "",
+        folderMissing: true,
+        error: String(e),
+      };
+    }
+  }
+  if (process.send) process.send({ results });
+  setTimeout(() => process.exit(0), 200);
 }

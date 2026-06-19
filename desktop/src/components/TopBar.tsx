@@ -3,6 +3,7 @@ import { useT } from "../i18n";
 import { useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 import { LanguageToggle } from "./LanguageToggle";
+import SteamStatusHint from "./SteamStatusHint";
 import { Gamepad2, ChevronDown, Play, Loader2, Settings } from "lucide-react";
 import clsx from "clsx";
 
@@ -103,6 +104,7 @@ export default function TopBar() {
         )}
       </div>
       <div className="flex items-center gap-2">
+        <SteamStatusHint />
         <LanguageToggle compact />
         <button
           onClick={() => setShowSettingsPage(true)}

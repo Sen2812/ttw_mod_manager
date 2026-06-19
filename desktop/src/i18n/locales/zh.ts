@@ -32,6 +32,9 @@ export const zh: Record<string, string> = {
   "topbar.unsavedLaunchMsg": "当前有未保存的 mod 修改。启动游戏前是否保存？",
   "topbar.launchSaveAndLaunch": "保存并启动",
   "topbar.launchWithoutSaving": "不保存直接启动",
+  "steamStatus.label": "Steam",
+  "steamStatus.runningTooltip": "Steam 客户端正在运行",
+  "steamStatus.notRunningTooltip": "Steam 客户端未运行 — 工坊订阅与下载功能可能不可用",
   "close.unsavedTitle": "有未保存的修改",
   "close.unsavedMsg": "退出前是否保存当前修改？",
 
@@ -80,6 +83,11 @@ export const zh: Record<string, string> = {
   "modlist.overwritesTooltip": "{n} 个 mod 存在文件冲突，共 {m} 个文件被覆盖。点击查看全局详情",
   "modlist.rowOverwriteTooltip": "覆盖情况：胜出 {wins} 个文件，被覆盖 {losses} 个文件。点击查看详情",
   "modlist.dependencyTooltip": "{n} 个必须 mod 未满足。点击查看详情",
+  "modlist.downloadingTooltip": "已订阅，等待 Steam 下载完成",
+  "modlist.downloadProgress": "Steam 下载中… {pct}%",
+  "modlist.downloadValidating": "Steam 校验中…",
+  "modlist.downloadQueued": "已请求下载，请保持 Steam 运行",
+  "modlist.requestDownload": "请求 Steam 下载",
   "modlist.updateTooltip": "工坊有更新可用。点击查看详情",
 
   // ─── Mod 分类 ────────────────────────────────────────────────────────
@@ -215,6 +223,7 @@ export const zh: Record<string, string> = {
   "update.status.ok": "已是最新",
   "update.status.outdated": "有更新可用",
   "update.status.unknown": "版本未知",
+  "update.status.downloading": "下载中…",
   "update.outdatedHint": "工坊上的版本比本地更新。强制更新将删除本地文件，并由 Steam 重新下载最新版本。",
   "update.forceUpdate": "强制更新",
   "update.confirmTitle": "强制更新工坊 Mod",

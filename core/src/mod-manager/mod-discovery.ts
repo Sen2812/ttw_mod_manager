@@ -13,6 +13,7 @@ import { readPackHeader, NodeBinaryReader } from "../pack-file";
 import { readLauncherModNameIndex } from "../launcher/launcher-sync";
 import { fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
 import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
+import { fetchSubscribedWorkshopIds } from "./workshop-subscriptions-fetcher";
 import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
 import {
   WorkshopCache,
@@ -118,7 +119,11 @@ export async function fetchWorkshopMetadata(
 
       for (const item of data) {
         if (!item.publishedfileid) continue;
-        const raw = item as WorkshopItemData & { result?: number; time_updated?: number | string };
+        const raw = item as WorkshopItemData & {
+          result?: number;
+          time_updated?: number | string;
+          consumer_app_id?: number;
+        };
         const resultCode = raw.result ?? 1;
         if (resultCode !== 1) {
           result.set(item.publishedfileid, {
@@ -137,6 +142,7 @@ export async function fetchWorkshopMetadata(
           tags: item.tags,
           creator: item.creator,
           timeUpdated,
+          consumerAppId: raw.consumer_app_id != null ? Number(raw.consumer_app_id) : undefined,
         });
       }
 
@@ -469,6 +475,142 @@ export async function resolveGameFolderPaths(
   log?.(`Data folder: ${dataFolder}`);
 
   return { gamePath, contentFolder, dataFolder };
+}
+
+// ─── Steam Workshop pending downloads ────────────────────────────────────────
+
+/** Placeholder mod for a subscribed workshop item without a local .pack yet. */
+export function buildPendingWorkshopMod(
+  workshopId: string,
+  contentFolder: string,
+  hints?: Partial<Mod>,
+): Mod {
+  const subfolderPath = path.join(contentFolder, workshopId);
+  const packName = hints?.name?.endsWith(".pack") ? hints.name : `${workshopId}.pack`;
+  const packPath = path.join(subfolderPath, packName);
+  return {
+    humanName: hints?.humanName && isUsableWorkshopTitle(hints.humanName, workshopId)
+      ? hints.humanName
+      : (hints?.humanName || workshopId),
+    name: packName,
+    path: packPath,
+    modDirectory: subfolderPath,
+    imgPath: hints?.imgPath && fs.existsSync(hints.imgPath) ? hints.imgPath : "",
+    workshopId,
+    isEnabled: hints?.isEnabled ?? false,
+    isInData: false,
+    isDeleted: false,
+    isMovie: hints?.isMovie ?? false,
+    author: hints?.author ?? "",
+    tags: hints?.tags?.length ? hints.tags : ["mod"],
+    categories: hints?.categories ? [...hints.categories] : undefined,
+    loadOrder: hints?.loadOrder,
+    lastChanged: hints?.lastChanged,
+    lastChangedLocal: hints?.lastChangedLocal,
+    reqModIds: hints?.reqModIds ? [...hints.reqModIds] : undefined,
+    reqModIdToName: hints?.reqModIdToName ? hints.reqModIdToName.map(p => [...p] as [string, string]) : undefined,
+    pendingDownload: true,
+  };
+}
+
+function workshopFolderHasPack(contentFolder: string, workshopId: string): boolean {
+  const folder = path.join(contentFolder, workshopId);
+  if (!fs.existsSync(folder)) return false;
+  try {
+    return fs.readdirSync(folder).some(name => name.endsWith(".pack"));
+  } catch {
+    return false;
+  }
+}
+
+async function filterWorkshopIdsForGame(
+  ids: string[],
+  gameSteamId: string,
+  log?: LogCallback,
+): Promise<string[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const meta = await fetchWorkshopMetadata(unique, log);
+  const target = Number(gameSteamId);
+  return unique.filter(id => {
+    const entry = meta.get(id);
+    if (!entry || (entry.apiResult !== undefined && entry.apiResult !== 1)) return false;
+    if (entry.consumerAppId !== undefined) return entry.consumerAppId === target;
+    return true;
+  });
+}
+
+async function mergeMissingSubscribedWorkshopMods(
+  mods: Mod[],
+  contentFolderIds: string[],
+  contentFolder: string | undefined,
+  game: GameDefinition,
+  cacheDir: string | undefined,
+  preserveWorkshopMods: Mod[] | undefined,
+  skipSteamSubscriptionFetch: boolean,
+  log?: LogCallback,
+): Promise<string[]> {
+  const presentWorkshopIds = new Set(
+    mods
+      .map(m => resolveModWorkshopId(m))
+      .filter(isNumericWorkshopId),
+  );
+
+  const hintByWorkshopId = new Map<string, Partial<Mod>>();
+  for (const prev of preserveWorkshopMods ?? []) {
+    const id = resolveModWorkshopId(prev);
+    if (id) hintByWorkshopId.set(id, prev);
+  }
+
+  const cache = cacheDir ? new WorkshopCache(cacheDir).load(log) : null;
+  if (cache) {
+    for (const [id, entry] of cache.asMap()) {
+      if (!isNumericWorkshopId(id) || hintByWorkshopId.has(id)) continue;
+      hintByWorkshopId.set(id, {
+        humanName: entry.title,
+        author: entry.creator,
+        tags: entry.tags ? normalizeWorkshopTags(entry.tags) : undefined,
+      });
+    }
+  }
+
+  const subscribedIds = skipSteamSubscriptionFetch
+    ? []
+    : await fetchSubscribedWorkshopIds(game, log);
+
+  const missingIds = new Set<string>();
+  for (const prev of preserveWorkshopMods ?? []) {
+    const id = resolveModWorkshopId(prev);
+    if (id && !presentWorkshopIds.has(id)) missingIds.add(id);
+  }
+
+  if (!skipSteamSubscriptionFetch && contentFolder) {
+    const subscribedMissing = subscribedIds.filter(
+      id => !presentWorkshopIds.has(id) && !workshopFolderHasPack(contentFolder, id),
+    );
+    if (subscribedMissing.length > 0) {
+      const forGame = await filterWorkshopIdsForGame(subscribedMissing, game.steamId, log);
+      for (const id of forGame) missingIds.add(id);
+    }
+  }
+
+  let added = 0;
+  if (contentFolder) {
+    for (const workshopId of missingIds) {
+      mods.push(buildPendingWorkshopMod(workshopId, contentFolder, hintByWorkshopId.get(workshopId)));
+      presentWorkshopIds.add(workshopId);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    log?.(`Workshop: ${added} subscribed item(s) awaiting download — shown as placeholders`);
+  }
+
+  return [...new Set([
+    ...contentFolderIds.filter(isNumericWorkshopId),
+    ...subscribedIds.filter(isNumericWorkshopId),
+  ])];
 }
 
 // ─── Vanilla Pack Detection ──────────────────────────────────────────────────
@@ -820,6 +962,10 @@ export interface ScanResult {
 export interface ScanModsOptions {
   /** Skip Steam/network workshop fetches; use on-disk cache only for fast startup. */
   deferNetwork?: boolean;
+  /** Keep these workshop mods visible while Steam re-downloads local content. */
+  preserveWorkshopMods?: Mod[];
+  /** Skip live Steam subscription query (avoids steamworks churn during download polling). */
+  skipSteamSubscriptionFetch?: boolean;
 }
 
 function applyWorkshopMetadataFromCache(mods: Mod[], cache: WorkshopCache): void {
@@ -1025,14 +1171,14 @@ export async function scanMods(
   }
 
   // Scan Workshop content folder
-  const workshopIds: string[] = [];
+  const contentFolderIds: string[] = [];
   if (folderPaths.contentFolder && fs.existsSync(folderPaths.contentFolder)) {
     log?.("Scanning Workshop content folder...");
     const contentModCount = mods.length;
     const entries = fs.readdirSync(folderPaths.contentFolder, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      workshopIds.push(entry.name);
+      contentFolderIds.push(entry.name);
       try {
         const mod = await buildContentMod(folderPaths.contentFolder, entry.name);
         if (mod) {
@@ -1044,6 +1190,7 @@ export async function scanMods(
           }
           mods.push(mod);
         }
+        // Empty workshop folders are handled via live subscription list only.
       } catch (e) {
         log?.(`  Error reading Workshop mod ${entry.name}: ${e}`);
       }
@@ -1052,6 +1199,17 @@ export async function scanMods(
   } else {
     log?.("Workshop content folder not found (may be a non-Steam install)");
   }
+
+  const workshopIds = await mergeMissingSubscribedWorkshopMods(
+    mods,
+    contentFolderIds,
+    folderPaths.contentFolder,
+    game,
+    cacheDir,
+    options.preserveWorkshopMods,
+    options.skipSteamSubscriptionFetch === true,
+    log,
+  );
 
   applyLauncherModNames(mods, game, log);
 

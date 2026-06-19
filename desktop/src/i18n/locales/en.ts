@@ -32,6 +32,9 @@ export const en: Record<string, string> = {
   "topbar.unsavedLaunchMsg": "You have unsaved mod changes. Save before launching the game?",
   "topbar.launchSaveAndLaunch": "Save & Launch",
   "topbar.launchWithoutSaving": "Launch without saving",
+  "steamStatus.label": "Steam",
+  "steamStatus.runningTooltip": "Steam client is running",
+  "steamStatus.notRunningTooltip": "Steam client is not running — workshop features may be unavailable",
   "close.unsavedTitle": "Unsaved changes",
   "close.unsavedMsg": "Would you like to save your changes before exiting?",
 
@@ -80,6 +83,11 @@ export const en: Record<string, string> = {
   "modlist.overwritesTooltip": "{n} mods have file conflicts, {m} files overwritten. Click for global details",
   "modlist.rowOverwriteTooltip": "Overwrites: wins {wins} files, loses {losses} files. Click for details",
   "modlist.dependencyTooltip": "{n} required mod(s) missing. Click for details",
+  "modlist.downloadingTooltip": "Subscribed — waiting for Steam to download",
+  "modlist.downloadProgress": "Steam downloading… {pct}%",
+  "modlist.downloadValidating": "Steam validating…",
+  "modlist.downloadQueued": "Download queued — keep Steam running",
+  "modlist.requestDownload": "Request Steam download",
   "modlist.updateTooltip": "Workshop update available. Click for details",
 
   // ─── Mod Categories ──────────────────────────────────────────────────
@@ -215,6 +223,7 @@ export const en: Record<string, string> = {
   "update.status.ok": "Up to date",
   "update.status.outdated": "Update available",
   "update.status.unknown": "Version unknown",
+  "update.status.downloading": "Downloading…",
   "update.outdatedHint": "The workshop version is newer than your local copy. Force update to delete local files and let Steam re-download the latest version.",
   "update.forceUpdate": "Force Update",
   "update.confirmTitle": "Force Workshop Update",

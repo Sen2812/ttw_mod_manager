@@ -8,12 +8,13 @@ import type { WorkshopItemData } from "./workshop-cache";
 /** Allow small clock / filesystem skew when comparing timestamps. */
 export const UPDATE_TIME_TOLERANCE_MS = 60_000;
 
-export type ModUpdateStatus = "ok" | "outdated" | "unknown";
+export type ModUpdateStatus = "ok" | "outdated" | "unknown" | "downloading";
 
 /** Whether a workshop mod's local copy is older than the latest workshop version. */
 export function getModUpdateStatus(
-  mod: Pick<Mod, "workshopId" | "isInData" | "lastChanged" | "lastChangedLocal">,
+  mod: Pick<Mod, "workshopId" | "isInData" | "lastChanged" | "lastChangedLocal" | "pendingDownload">,
 ): ModUpdateStatus {
+  if (mod.pendingDownload) return "downloading";
   if (mod.isInData || !mod.workshopId) return "ok";
   if (!mod.lastChanged || !mod.lastChangedLocal) return "unknown";
   return mod.lastChanged > mod.lastChangedLocal + UPDATE_TIME_TOLERANCE_MS ? "outdated" : "ok";

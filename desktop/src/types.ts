@@ -16,6 +16,10 @@ export interface Mod {
   reqModIdToName?: [string, string][];
   reqModIds?: string[];
   customTags?: string[];
+  /** Subscribed but local .pack not present (re-downloading). */
+  pendingDownload?: boolean;
+  downloadBytesCurrent?: number;
+  downloadBytesTotal?: number;
 }
 
 export interface Preset { name: string; mods: Mod[]; version?: number; }
@@ -100,6 +104,7 @@ declare global {
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
       resetLoadOrder: () => Promise<Mod[] | ApiResponse>;
       getConfig: () => Promise<AppConfigResponse>;
+      getSteamStatus: () => Promise<{ installed: boolean; running: boolean }>;
       setGame: (g: string) => Promise<{ mods?: Mod[]; presets?: Preset[]; folderPaths?: AppConfigResponse["folderPaths"]; game?: GameInfo; error?: string; subscribedWorkshopIds?: string[] }>;
       getPresets: () => Promise<Preset[]>;
       createPreset: (n: string, copyFromCurrent?: boolean) => Promise<Preset[] | ApiResponse>;
@@ -132,6 +137,7 @@ declare global {
       addCustomCategory: (name: string) => Promise<string[]>;
       checkModUpdates: (force?: boolean) => Promise<{ mods: Mod[]; outdatedCount: number }>;
       forceUpdateMod: (modName: string) => Promise<{ ok: boolean; error?: string; mods: Mod[]; outdatedCount: number }>;
+      triggerWorkshopDownload: (workshopId: string) => Promise<{ ok: boolean; error?: string; mods: Mod[] }>;
       forceUpdateAllOutdated: () => Promise<{ updated: number; failed: string[]; mods: Mod[]; outdatedCount: number }>;
       // External links / folders
       openUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
