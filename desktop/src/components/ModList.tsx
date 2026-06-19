@@ -9,7 +9,7 @@ import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
 import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2 } from "lucide-react";
 import clsx from "clsx";
-import type { Mod } from "../types";
+import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
 import ModCategorySelect from "./ModCategorySelect";
 import CategoryFilter from "./CategoryFilter";
@@ -20,6 +20,21 @@ import { isModOutdated } from "@core/mod-manager/workshop-update-status";
 import { getModDependencyReport } from "../utils/dependency-actions";
 
 // ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
+
+function modLabel(mods: Mod[], packName: string): string {
+  const m = mods.find(x => x.name === packName);
+  return m ? getModDisplayName(m) : packName.replace(/\.pack$/i, "");
+}
+
+function buildOverwriteTooltip(t: (key: string, params?: Record<string, string | number>) => string, stats: ModConflictStats, mods: Mod[]): string {
+  const lines = [t("modlist.rowOverwriteDetail", { wins: stats.wins, losses: stats.losses })];
+  const beatNames = stats.overwrites?.slice(0, 2).map(r => modLabel(mods, r.modName));
+  const loseNames = stats.overwrittenBy?.slice(0, 2).map(r => modLabel(mods, r.modName));
+  if (beatNames?.length) lines.push(t("modlist.rowOverwriteBeats", { mods: beatNames.join(" · ") }));
+  if (loseNames?.length) lines.push(t("modlist.rowOverwriteLosesTo", { mods: loseNames.join(" · ") }));
+  lines.push(t("modlist.rowOverwriteTooltip"));
+  return lines.join("\n");
+}
 
 interface ModRowProps {
   mod: Mod;
@@ -42,6 +57,7 @@ const ModRow = memo(function ModRow({
   hasUpdate, category, categories, onCategoryChange, onAddCategory,
 }: ModRowProps) {
   const t = useT();
+  const allMods = useStore(s => s.mods);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortDragging } = useSortable({ id: mod.name });
   const style = { transform: CSS.Transform.toString(transform), transition };
   // 仅订阅本行的覆盖统计，避免其他 mod 统计变化导致重渲染
@@ -168,13 +184,17 @@ const ModRow = memo(function ModRow({
           <button
             onClick={(e) => { e.stopPropagation(); onShowCompat(mod.name); }}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-morandi-sidebar/60 hover:bg-morandi-hover transition-colors"
-            title={t("modlist.rowOverwriteTooltip", { wins: stats.wins, losses: stats.losses })}
+            title={buildOverwriteTooltip(t, stats, allMods)}
           >
             {stats.wins > 0 && (
-              <span className="text-[10px] font-semibold text-morandi-success leading-none">↑{stats.wins}</span>
+              <span className="text-[10px] font-medium text-morandi-success leading-none px-1 py-0.5 rounded bg-morandi-success/10">
+                {t("modlist.overwriteActiveShort", { n: stats.wins })}
+              </span>
             )}
             {stats.losses > 0 && (
-              <span className="text-[10px] font-semibold text-morandi-danger leading-none">↓{stats.losses}</span>
+              <span className="text-[10px] font-medium text-morandi-danger leading-none px-1 py-0.5 rounded bg-morandi-danger/10">
+                {t("modlist.overwriteOverriddenShort", { n: stats.losses })}
+              </span>
             )}
           </button>
         )}

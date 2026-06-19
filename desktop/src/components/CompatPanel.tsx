@@ -3,7 +3,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import {
   X, RefreshCw, Loader2, Trophy, AlertTriangle, Package,
-  ChevronDown, ChevronRight, Search, ArrowUp, ArrowDown,
+  ChevronDown, ChevronRight, Search, Info,
 } from "lucide-react";
 import clsx from "clsx";
 import type { FileConflict, Mod, ModRelation } from "../types";
@@ -148,17 +148,18 @@ export default function CompatPanel() {
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-base font-semibold text-morandi-text truncate">{displayName}</h2>
-            <div className="flex items-center gap-3 mt-0.5">
-              <span className="inline-flex items-center gap-1 text-xs">
-                <ArrowUp className="w-3 h-3 text-morandi-success" />
+            <h2 className="text-base font-semibold text-morandi-text truncate">{t("compat.panelTitle")}</h2>
+            <p className="text-xs text-morandi-text-secondary truncate mt-0.5">
+              {t("compat.panelSubtitle", { mod: displayName })}
+            </p>
+            <div className="flex items-center gap-3 mt-1.5">
+              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-morandi-success/10">
                 <span className="text-morandi-success font-semibold">{winCount}</span>
-                <span className="text-morandi-text-muted">{t("compat.overwritesShort")}</span>
+                <span className="text-morandi-success">{t("compat.overwritesShort")}</span>
               </span>
-              <span className="inline-flex items-center gap-1 text-xs">
-                <ArrowDown className="w-3 h-3 text-morandi-danger" />
+              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-morandi-danger/10">
                 <span className="text-morandi-danger font-semibold">{lossCount}</span>
-                <span className="text-morandi-text-muted">{t("compat.overwrittenByShort")}</span>
+                <span className="text-morandi-danger">{t("compat.overwrittenByShort")}</span>
               </span>
             </div>
           </div>
@@ -170,6 +171,14 @@ export default function CompatPanel() {
           <button onClick={handleClose} className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors shrink-0">
             <X className="w-5 h-5 text-morandi-text-secondary" />
           </button>
+        </div>
+
+        {/* 规则说明 */}
+        <div className="px-4 py-2.5 border-b border-morandi-border-light bg-morandi-sidebar/40 shrink-0">
+          <div className="flex items-start gap-2 text-xs text-morandi-text-secondary leading-relaxed">
+            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-morandi-accent" />
+            <p>{t("compat.ruleHint")}</p>
+          </div>
         </div>
 
         {/* 搜索栏 */}
@@ -193,7 +202,8 @@ export default function CompatPanel() {
           ) : (
             <>
               <ConflictSection
-                title={t("compat.overwritesSection", { n: winFiles.length })}
+                title={t("compat.overwritesSection")}
+                fileCount={winFiles.length}
                 accent="win"
                 relations={overwrites.filter(filterRelation)}
                 totalRelationCount={overwrites.length}
@@ -208,7 +218,8 @@ export default function CompatPanel() {
                 onReorder={handleReorder}
               />
               <ConflictSection
-                title={t("compat.overwrittenBySection", { n: lossFiles.length })}
+                title={t("compat.overwrittenBySection")}
+                fileCount={lossFiles.length}
                 accent="lose"
                 relations={overwrittenBy.filter(filterRelation)}
                 totalRelationCount={overwrittenBy.length}
@@ -231,8 +242,9 @@ export default function CompatPanel() {
 }
 
 /** 一个分区：mod 关系摘要 + 文件详情列表 */
-function ConflictSection({ title, accent, relations, totalRelationCount, files, allFiles, totalFileCount, focusMod, mods, expanded, onToggleExpand, emptyText, onReorder }: {
+function ConflictSection({ title, fileCount, accent, relations, totalRelationCount, files, allFiles, totalFileCount, focusMod, mods, expanded, onToggleExpand, emptyText, onReorder }: {
   title: string;
+  fileCount: number;
   accent: "win" | "lose";
   relations: ModRelation[];
   totalRelationCount: number;
@@ -253,13 +265,22 @@ function ConflictSection({ title, accent, relations, totalRelationCount, files, 
   return (
     <div>
       <div className={clsx(
-        "sticky top-0 z-10 px-4 py-2 flex items-center gap-1.5 text-sm font-medium border-b backdrop-blur-sm",
+        "sticky top-0 z-10 px-4 py-2.5 border-b backdrop-blur-sm",
         accent === "win"
-          ? "bg-morandi-success-light/40 text-morandi-success border-morandi-success/30"
-          : "bg-morandi-danger-light/40 text-morandi-danger border-morandi-danger/30",
+          ? "bg-morandi-success-light/40 border-morandi-success/30"
+          : "bg-morandi-danger-light/40 border-morandi-danger/30",
       )}>
-        {accent === "win" ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
-        <span>{title}</span>
+        <div className={clsx(
+          "text-sm font-medium",
+          accent === "win" ? "text-morandi-success" : "text-morandi-danger",
+        )}>
+          {title}
+        </div>
+        {fileCount > 0 && (
+          <div className="text-[11px] mt-0.5 opacity-80 text-morandi-text-secondary">
+            {t("compat.overwritesSectionFiles", { n: fileCount })}
+          </div>
+        )}
       </div>
 
       {isEmpty ? (
@@ -316,6 +337,12 @@ function RelationRow({ relation, accent, focusMod, mods, categoryCounts, onReord
   const reorderHint = accent === "win"
     ? t("compat.moveAboveHint", { mod: otherName })
     : t("compat.moveBelowHint", { mod: otherName });
+  const relationDesc = accent === "win"
+    ? t("compat.relationWinDesc", { other: otherName, count: relation.fileCount })
+    : t("compat.relationLossDesc", { other: otherName, count: relation.fileCount });
+  const actionLabel = accent === "win"
+    ? t("compat.actionLetOtherWin", { other: otherName })
+    : t("compat.actionLetSelfWin");
 
   return (
     <div className="rounded-md border border-morandi-border-light/80 px-2.5 py-2 bg-morandi-page/50">
@@ -324,22 +351,18 @@ function RelationRow({ relation, accent, focusMod, mods, categoryCounts, onReord
           ? <Trophy className="w-3.5 h-3.5 text-morandi-success shrink-0 mt-0.5" />
           : <AlertTriangle className="w-3.5 h-3.5 text-morandi-danger shrink-0 mt-0.5" />}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-morandi-text truncate" title={relation.modName}>
-              {otherName}
-            </span>
-            <span className="text-[10px] text-morandi-text-secondary shrink-0">
-              {t("compat.modRelationFiles", { count: relation.fileCount })}
-            </span>
-          </div>
+          <p className="text-xs text-morandi-text leading-relaxed">{relationDesc}</p>
           <CategoryBadges counts={categoryCounts} />
         </div>
         <button
           type="button"
           title={reorderHint}
           onClick={() => onReorder(relation.modName, reorderPosition)}
-          className="btn-morandi-ghost text-[10px] shrink-0 px-2 py-1">
-          {accent === "win" ? t("compat.moveAbove") : t("compat.moveBelow")}
+          className={clsx(
+            "btn-morandi-ghost text-[10px] shrink-0 px-2 py-1 max-w-[7.5rem] text-center leading-tight",
+            accent === "win" ? "text-morandi-success" : "text-morandi-danger",
+          )}>
+          {actionLabel}
         </button>
       </div>
     </div>
@@ -424,9 +447,9 @@ function FileRow({ conflict, focusMod, isExpanded, onToggle, accent, mods }: {
                   <span className="text-[10px] text-morandi-text-muted shrink-0">
                     {t("compat.order", { n: p.loadOrder })} · {formatSize(p.size)}
                   </span>
-                  <span className={clsx("text-[10px] font-medium shrink-0 w-8 text-right",
+                  <span className={clsx("text-[10px] font-medium shrink-0 text-right",
                     isWinner ? "text-morandi-success" : "text-morandi-danger")}>
-                    {isWinner ? t("compat.win") : t("compat.lose")}
+                    {isWinner ? t("compat.statusActive") : t("compat.statusOverridden")}
                   </span>
                 </div>
               );
