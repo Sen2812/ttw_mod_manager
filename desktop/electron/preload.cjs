@@ -4,6 +4,7 @@ const api = {
   getMods: () => ipcRenderer.invoke("get-mods"),
   bootstrap: () => ipcRenderer.invoke("bootstrap"),
   scanMods: () => ipcRenderer.invoke("scan-mods"),
+  importLocalPacks: () => ipcRenderer.invoke("import-local-packs"),
   toggleMod: (n) => ipcRenderer.invoke("toggle-mod", n),
   enableMod: (n) => ipcRenderer.invoke("enable-mod", n),
   disableMod: (n) => ipcRenderer.invoke("disable-mod", n),

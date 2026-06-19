@@ -21,6 +21,8 @@ interface AppState {
   showDependencyModal: boolean;
   /** 批量必须 mod 告警（勾选/导入/切换 Profile 后） */
   dependencyAlertReports: ModDependencyReport[] | null;
+  /** 用户已确认必须 mod 告警后，不再因逐个启用 mod 而自动弹出 */
+  dependencyAlertsSuppressed: boolean;
   /** 已知分类列表（含自定义） */
   categories: string[];
   categoryFilter: string | null;
@@ -44,8 +46,9 @@ interface AppState {
   refreshOverwriteStats: (opts?: { full?: boolean }) => Promise<void>;
   openDependencyModal: (modName: string) => void;
   closeDependencyModal: () => void;
-  openDependencyAlert: (reports: ModDependencyReport[]) => void;
+  openDependencyAlert: (reports: ModDependencyReport[], options?: { force?: boolean }) => void;
   closeDependencyAlert: () => void;
+  resetDependencyAlertSuppression: () => void;
   setCategories: (categories: string[]) => void;
   setCategoryFilter: (category: string | null) => void;
   openUpdateModal: (modName: string) => void;
@@ -66,12 +69,13 @@ export const useStore = create<AppState>((set, get) => ({
   originalMods: [], subscribedWorkshopIds: [],
   dependencyFocusMod: null, showDependencyModal: false,
   dependencyAlertReports: null,
+  dependencyAlertsSuppressed: false,
   categories: [], categoryFilter: null,
   updateFocusMod: null, showUpdateModal: false, isCheckingUpdates: false,
   prerequisiteChecking: {},
   setMods: (mods) => set({ mods }),
   setPresets: (presets) => set({ presets }),
-  setGames: (games) => set({ games }), setCurrentGame: (currentGame) => set({ currentGame }),
+  setGames: (games) => set({ games }), setCurrentGame: (currentGame) => set({ currentGame, dependencyAlertsSuppressed: false }),
   setFolderPaths: (folderPaths) => set({ folderPaths }), setFilter: (filter) => set({ filter }),
   setActivePresetName: (activePresetName) => {
     set({ activePresetName });
@@ -99,10 +103,17 @@ export const useStore = create<AppState>((set, get) => ({
   },
   openDependencyModal: (modName) => set({ showDependencyModal: true, dependencyFocusMod: modName }),
   closeDependencyModal: () => set({ showDependencyModal: false, dependencyFocusMod: null }),
-  openDependencyAlert: (reports) => set({
-    dependencyAlertReports: reports.length > 0 ? reports : null,
+  openDependencyAlert: (reports, options) => {
+    if (reports.length === 0) return;
+    const { dependencyAlertsSuppressed, dependencyAlertReports } = get();
+    if (dependencyAlertsSuppressed && !options?.force && !dependencyAlertReports) return;
+    set({ dependencyAlertReports: reports });
+  },
+  closeDependencyAlert: () => set({
+    dependencyAlertReports: null,
+    dependencyAlertsSuppressed: true,
   }),
-  closeDependencyAlert: () => set({ dependencyAlertReports: null }),
+  resetDependencyAlertSuppression: () => set({ dependencyAlertsSuppressed: false }),
   setCategories: (categories) => set({ categories }),
   setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
   openUpdateModal: (modName) => set({ showUpdateModal: true, updateFocusMod: modName }),

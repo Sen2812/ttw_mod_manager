@@ -14,7 +14,7 @@ import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
 import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
-import { fetchWorkshopDependenciesViaSteam, fetchSubscribedWorkshopIdsViaSteam, triggerWorkshopDownloadsViaSteam, getWorkshopItemStatusesViaSteam } from "./steam-client";
+import { fetchWorkshopDependenciesViaSteam, fetchSubscribedWorkshopIdsViaSteam, triggerWorkshopDownloadsViaSteam, getWorkshopItemStatusesViaSteam, probeSteamIpc } from "./steam-client";
 import { getSteamClientStatus } from "./steam-status";
 
 let mainWindow: BrowserWindow | null = null;
@@ -111,8 +111,10 @@ function notifyPrerequisitesCheckDone(modName: string): void {
 
 /** Run prerequisite fetch in background so toggle/enable IPC returns immediately. */
 function runModPrerequisitesCheck(modName: string): void {
-  notifyPrerequisitesCheckStarted(modName);
   void (async () => {
+    if (!(await isSteamIpcAvailable())) return;
+
+    notifyPrerequisitesCheckStarted(modName);
     try {
       await mm.ensureModPrerequisites(modName);
       notifyModsUpdated();
@@ -122,6 +124,28 @@ function runModPrerequisitesCheck(modName: string): void {
       notifyPrerequisitesCheckDone(modName);
     }
   })();
+}
+
+let cachedSteamIpc: { available: boolean; at: number } | null = null;
+const STEAM_IPC_CACHE_MS = 30_000;
+
+function recordSteamIpcAvailable(available: boolean): void {
+  cachedSteamIpc = { available, at: Date.now() };
+}
+
+async function isSteamIpcAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (cachedSteamIpc && now - cachedSteamIpc.at < STEAM_IPC_CACHE_MS) {
+    return cachedSteamIpc.available;
+  }
+  const appId = getCurrentSteamAppId();
+  if (!appId) {
+    recordSteamIpcAvailable(false);
+    return false;
+  }
+  const probe = await probeSteamIpc(appId);
+  recordSteamIpcAvailable(probe.ok);
+  return probe.ok;
 }
 
 function getCurrentSteamAppId(): number | undefined {
@@ -421,7 +445,9 @@ function registerIpc() {
 
   ipcMain.handle("get-steam-status", async () => {
     const appId = getCurrentSteamAppId();
-    return getSteamClientStatus(appId);
+    const status = await getSteamClientStatus(appId);
+    recordSteamIpcAvailable(status.ipcAvailable);
+    return status;
   });
 
   // ── 配置 ─────────────────────────────────────────────────────────────────
@@ -466,6 +492,25 @@ function registerIpc() {
     await ensureInit();
     await mm.scanMods({ deferNetwork: true, skipSteamSubscriptionFetch: pendingDownloadLocked.size > 0 });
     return { mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
+  });
+  ipcMain.handle("import-local-packs", async () => {
+    await ensureInit();
+    if (!mm.folderPaths.gamePath) {
+      return { ok: false, error: "NO_GAME_PATH" };
+    }
+    const selected = dialog.showOpenDialogSync({
+      title: "Import local mods",
+      filters: [{ name: "Pack files", extensions: ["pack"] }],
+      properties: ["openFile", "multiSelections"],
+    });
+    if (!selected?.length) return { ok: false, cancelled: true };
+    try {
+      const importResult = mm.importLocalPacks(selected);
+      await mm.scanMods({ deferNetwork: true, skipSteamSubscriptionFetch: pendingDownloadLocked.size > 0 });
+      return { ok: true, ...importResult, mods: mm.getMods() };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
   });
   ipcMain.handle("toggle-mod", (_e, n: string) => {
     const mod = mm.getMods().find(m => m.name === n);

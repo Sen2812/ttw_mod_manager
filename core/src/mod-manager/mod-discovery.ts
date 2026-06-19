@@ -317,9 +317,9 @@ async function ensureWorkshopRequiredIds(
   } catch (e) {
     if (isSteamIpcUnavailableError(e)) {
       log?.(`Workshop required mods: ${formatSteamFetchSkipReason(e)} — using cache if available`);
-    } else {
-      log?.(`Workshop required mods: Steam fetch failed: ${e}`);
+      return;
     }
+    log?.(`Workshop required mods: Steam fetch failed: ${e}`);
     for (const id of needsFetch) {
       cache.setRequiredIds(id, [], true);
     }
@@ -1106,9 +1106,9 @@ export async function ensureModPrerequisites(
         log?.(`Required mods for ${modName}: ${formatSteamFetchSkipReason(e)} — using cache if available`);
       } else {
         log?.(`Failed to ensure required mods for ${modName}: ${e}`);
+        cache.setRequiredIds(workshopId, [], true);
+        cache.save();
       }
-      cache.setRequiredIds(workshopId, [], true);
-      cache.save();
     }
   }
 

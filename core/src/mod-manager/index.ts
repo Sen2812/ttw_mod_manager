@@ -12,3 +12,4 @@ export * from "./workshop-update-status";
 export * from "./workshop-update";
 export * from "./mod-display";
 export * from "./preset-order";
+export * from "./local-pack-import";

@@ -41,6 +41,7 @@ import {
   type ImportProfileOrderResult,
 } from "./preset-order";
 import { isUsableWorkshopTitle } from "./mod-display";
+import { importLocalPackFiles, type ImportLocalPacksResult } from "./local-pack-import";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
 
@@ -753,6 +754,22 @@ export class ModManager {
       this.config.currentGame,
       profileName ?? this.getActivePresetName(),
     );
+  }
+
+  /** Copy local .pack files into data/modding/ for mod management. */
+  importLocalPacks(sourcePaths: string[]): ImportLocalPacksResult {
+    if (!this.folderPaths.gamePath) {
+      throw new Error("NO_GAME_PATH");
+    }
+    const moddingFolder = path.join(this.folderPaths.gamePath, "data", "modding");
+    const dataFolder = this.folderPaths.dataFolder ?? path.join(this.folderPaths.gamePath, "data");
+    return importLocalPackFiles({
+      sourcePaths,
+      moddingFolder,
+      dataFolder,
+      vanillaPacks: this.vanillaPacks,
+      log: this.log,
+    });
   }
 
   /** Import load order; skips mods not installed locally. */

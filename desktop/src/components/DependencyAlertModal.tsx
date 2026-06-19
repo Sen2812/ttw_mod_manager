@@ -66,8 +66,9 @@ export default function DependencyAlertModal() {
           })}
         </div>
 
-        <div className="px-5 py-3 border-t border-morandi-border-light shrink-0 flex justify-end">
-          <button onClick={close} className="btn-morandi-ghost text-xs">{t("common.gotIt")}</button>
+        <div className="px-5 py-3 border-t border-morandi-border-light shrink-0 flex items-center justify-between gap-3">
+          <p className="text-[11px] text-morandi-text-muted">{t("dependency.alertDismissHint")}</p>
+          <button onClick={close} className="btn-morandi-ghost text-xs shrink-0">{t("common.gotIt")}</button>
         </div>
       </div>
     </div>

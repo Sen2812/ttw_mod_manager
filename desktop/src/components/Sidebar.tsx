@@ -39,7 +39,7 @@ export default function Sidebar() {
 
   const notifyDependencyIssues = (nextMods: typeof mods) => {
     const reports = scanEnabledDependencyReports(nextMods, subscribedWorkshopIds);
-    if (reports.length > 0) openDependencyAlert(reports);
+    if (reports.length > 0) openDependencyAlert(reports, { force: true });
   };
 
   const doApply = async (name: string) => {

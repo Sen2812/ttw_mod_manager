@@ -95,6 +95,15 @@ declare global {
       getMods: () => Promise<Mod[]>;
       bootstrap: () => Promise<BootstrapResponse>;
       scanMods: () => Promise<{ mods: Mod[]; subscribedWorkshopIds: string[] }>;
+      importLocalPacks: () => Promise<{
+        ok: boolean;
+        cancelled?: boolean;
+        error?: string;
+        imported?: string[];
+        skipped?: { path: string; reason: string }[];
+        failed?: { path: string; error: string }[];
+        mods?: Mod[];
+      }>;
       toggleMod: (n: string) => Promise<Mod[] | ApiResponse>;
       enableMod: (n: string) => Promise<Mod[] | ApiResponse>;
       disableMod: (n: string) => Promise<Mod[] | ApiResponse>;

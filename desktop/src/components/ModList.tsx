@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2 } from "lucide-react";
+import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
@@ -250,6 +250,7 @@ export default function ModList() {
   const setMods = useStore(s => s.setMods);
   const mods = useStore(s => s.mods);
   const isScanning = useStore(s => s.isScanning);
+  const setIsScanning = useStore(s => s.setIsScanning);
   const markDirty = useStore(s => s.markDirty);
   const openCompatPanel = useStore(s => s.openCompatPanel);
   const openDependencyModal = useStore(s => s.openDependencyModal);
@@ -269,6 +270,7 @@ export default function ModList() {
   const loadMode = useViewModeStore(s => s.loadMode);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
   const pendingDependencyAlertRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -289,6 +291,12 @@ export default function ModList() {
   useEffect(() => {
     if (activePresetName) loadMode(currentGame, activePresetName);
   }, [currentGame, activePresetName, loadMode]);
+
+  useEffect(() => {
+    if (!importMessage) return;
+    const id = window.setTimeout(() => setImportMessage(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [importMessage]);
 
   const filteredMods = useMemo(() => {
     // 第一步：按显示模式过滤（启用/禁用/全部）
@@ -333,7 +341,7 @@ export default function ModList() {
   // 稳定的回调，避免 memo 化的 ModRow 因 props 变化而重渲染
   const handleToggle = useCallback(async (mod: Mod) => {
     const wasEnabled = mod.isEnabled;
-    if (!wasEnabled) {
+    if (!wasEnabled && !useStore.getState().dependencyAlertsSuppressed) {
       pendingDependencyAlertRef.current = mod.name;
     } else if (pendingDependencyAlertRef.current === mod.name) {
       pendingDependencyAlertRef.current = null;
@@ -460,6 +468,32 @@ export default function ModList() {
     } catch (e) { console.error("Failed to reset load order:", e); }
   }, [setMods]);
 
+  const handleImportLocal = useCallback(async () => {
+    setIsScanning(true);
+    try {
+      const result = await window.api.importLocalPacks();
+      if (result.cancelled) return;
+      if (!result.ok) {
+        setImportMessage(
+          result.error === "NO_GAME_PATH"
+            ? t("modlist.importNoGamePath")
+            : result.error ?? t("modlist.importNothing"),
+        );
+        return;
+      }
+      if (result.mods) setMods(result.mods);
+      const parts: string[] = [];
+      if (result.imported?.length) parts.push(t("modlist.importResult", { n: result.imported.length }));
+      if (result.skipped?.length) parts.push(t("modlist.importSkipped", { n: result.skipped.length }));
+      if (result.failed?.length) parts.push(t("modlist.importFailed", { n: result.failed.length }));
+      setImportMessage(parts.length ? parts.join(" · ") : t("modlist.importNothing"));
+    } catch (e) {
+      console.error("Failed to import local packs:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  }, [setMods, setIsScanning, t]);
+
   const handleDragStart = useCallback((e: DragStartEvent) => {
     setActiveId(e.active.id as string);
   }, []);
@@ -510,6 +544,15 @@ export default function ModList() {
         <ViewModeToggle />
         <CategoryFilter />
         <button
+          onClick={handleImportLocal}
+          disabled={isScanning}
+          className="btn-morandi-ghost text-xs flex items-center gap-1"
+          title={t("modlist.importLocalTooltip")}
+        >
+          <FolderInput className="w-3.5 h-3.5" />
+          {t("modlist.importLocal")}
+        </button>
+        <button
           onClick={handleCheckUpdates}
           disabled={isCheckingUpdates || isScanning}
           className="btn-morandi-ghost text-xs flex items-center gap-1 relative"
@@ -557,6 +600,11 @@ export default function ModList() {
           )}
         </div>
       </div>
+      {importMessage && (
+        <div className="px-4 py-1.5 text-xs text-morandi-accent bg-morandi-accent/5 border-b border-morandi-border-light">
+          {importMessage}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         {isScanning ? (
           <div className="flex items-center justify-center h-full text-morandi-text-muted">
