@@ -27,6 +27,8 @@ interface AppState {
   updateFocusMod: string | null;
   showUpdateModal: boolean;
   isCheckingUpdates: boolean;
+  /** Mod names currently undergoing background required-mod detection. */
+  prerequisiteChecking: Record<string, boolean>;
   setMods: (m: Mod[]) => void; setPresets: (p: Preset[]) => void;
   setGames: (g: GameInfo[]) => void; setCurrentGame: (g: string) => void;
   setFolderPaths: (p?: any) => void; setFilter: (f: string) => void;
@@ -49,6 +51,7 @@ interface AppState {
   openUpdateModal: (modName: string) => void;
   closeUpdateModal: () => void;
   setIsCheckingUpdates: (v: boolean) => void;
+  setPrerequisiteChecking: (modName: string, checking: boolean) => void;
   markDirty: () => void; markClean: () => void;
   saveCurrentState: () => Promise<void>;
   filteredMods: () => Mod[]; enabledCount: () => number; totalCount: () => number;
@@ -65,6 +68,7 @@ export const useStore = create<AppState>((set, get) => ({
   dependencyAlertReports: null,
   categories: [], categoryFilter: null,
   updateFocusMod: null, showUpdateModal: false, isCheckingUpdates: false,
+  prerequisiteChecking: {},
   setMods: (mods) => set({ mods }),
   setPresets: (presets) => set({ presets }),
   setGames: (games) => set({ games }), setCurrentGame: (currentGame) => set({ currentGame }),
@@ -104,6 +108,12 @@ export const useStore = create<AppState>((set, get) => ({
   openUpdateModal: (modName) => set({ showUpdateModal: true, updateFocusMod: modName }),
   closeUpdateModal: () => set({ showUpdateModal: false, updateFocusMod: null }),
   setIsCheckingUpdates: (isCheckingUpdates) => set({ isCheckingUpdates }),
+  setPrerequisiteChecking: (modName, checking) => set(state => {
+    const next = { ...state.prerequisiteChecking };
+    if (checking) next[modName] = true;
+    else delete next[modName];
+    return { prerequisiteChecking: next };
+  }),
   markDirty: () => {
     set({ isDirty: true });
     window.api?.setUnsavedChanges(true).catch(console.error);

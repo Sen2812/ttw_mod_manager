@@ -78,6 +78,13 @@ function AppShell() {
       window.api.onModsUpdated(onModsUpdated);
     }
 
+    window.api.onPrerequisitesCheckStarted?.((modName) => {
+      useStore.getState().setPrerequisiteChecking(modName, true);
+    });
+    window.api.onPrerequisitesCheckDone?.((modName) => {
+      useStore.getState().setPrerequisiteChecking(modName, false);
+    });
+
     (async () => {
       setIsScanning(true);
       setInitError(null);

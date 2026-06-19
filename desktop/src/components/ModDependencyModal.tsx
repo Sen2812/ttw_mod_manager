@@ -1,7 +1,7 @@
 import { useMemo, useCallback } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
-import { X, AlertTriangle, Package } from "lucide-react";
+import { X, AlertTriangle, Package, Loader2 } from "lucide-react";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModDisplayName } from "@core/mod-manager/mod-display";
 import RequiredModIssueRow from "./RequiredModIssueRow";
@@ -16,6 +16,7 @@ export default function ModDependencyModal() {
   const setMods = useStore(s => s.setMods);
   const markDirty = useStore(s => s.markDirty);
   const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
+  const isChecking = useStore(s => focusModName ? !!s.prerequisiteChecking[focusModName] : false);
 
   const mod = useMemo(
     () => mods.find(m => m.name === focusModName),
@@ -41,8 +42,8 @@ export default function ModDependencyModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-morandi-text/30 backdrop-blur-sm" onClick={close} />
-      <div className="relative card-morandi w-[560px] max-w-[95vw] max-h-[75vh] flex flex-col overflow-hidden">
+      <div className="modal-backdrop" onClick={close} />
+      <div className="modal-panel w-[560px] max-w-[95vw] max-h-[75vh] flex flex-col overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-morandi-border-light shrink-0">
           <div className="w-9 h-9 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
             {mod.imgPath ? (
@@ -66,7 +67,12 @@ export default function ModDependencyModal() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-3">
-          {issues.length === 0 ? (
+          {isChecking ? (
+            <div className="py-10 text-center space-y-3">
+              <Loader2 className="w-7 h-7 animate-spin mx-auto text-morandi-accent" />
+              <p className="text-sm text-morandi-text-muted">{t("dependency.checking")}</p>
+            </div>
+          ) : issues.length === 0 ? (
             <p className="text-sm text-morandi-text-muted text-center py-8">{t("dependency.allSatisfied")}</p>
           ) : (
             <>

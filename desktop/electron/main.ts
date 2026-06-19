@@ -97,6 +97,31 @@ function notifyModsUpdated(): void {
   });
 }
 
+function notifyPrerequisitesCheckStarted(modName: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("prerequisites-check-started", modName);
+}
+
+function notifyPrerequisitesCheckDone(modName: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send("prerequisites-check-done", modName);
+}
+
+/** Run prerequisite fetch in background so toggle/enable IPC returns immediately. */
+function runModPrerequisitesCheck(modName: string): void {
+  notifyPrerequisitesCheckStarted(modName);
+  void (async () => {
+    try {
+      await mm.ensureModPrerequisites(modName);
+      notifyModsUpdated();
+    } catch (e) {
+      appLog(`Prerequisites check failed for ${modName}: ${e}`);
+    } finally {
+      notifyPrerequisitesCheckDone(modName);
+    }
+  })();
+}
+
 /** Background workshop metadata sync and update checks after first paint. */
 async function runDeferredWorkshopEnrichment(): Promise<void> {
   const gen = ++deferredWorkshopGeneration;
@@ -252,16 +277,16 @@ function registerIpc() {
     void runDeferredWorkshopEnrichment();
     return { mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
   });
-  ipcMain.handle("toggle-mod", async (_e, n: string) => {
+  ipcMain.handle("toggle-mod", (_e, n: string) => {
     const mod = mm.getMods().find(m => m.name === n);
     const enabling = mod && !mod.isEnabled;
     mm.toggleMod(n);
-    if (enabling) await mm.ensureModPrerequisites(n);
+    if (enabling) runModPrerequisitesCheck(n);
     return mm.getMods();
   });
-  ipcMain.handle("enable-mod", async (_e, n: string) => {
+  ipcMain.handle("enable-mod", (_e, n: string) => {
     mm.enableMod(n);
-    await mm.ensureModPrerequisites(n);
+    runModPrerequisitesCheck(n);
     return mm.getMods();
   });
   ipcMain.handle("disable-mod", (_e, n: string) => { mm.disableMod(n); return mm.getMods(); });

@@ -203,6 +203,7 @@ export const en: Record<string, string> = {
   "dependency.action.download": "Download",
   "dependency.action.notInstalled": "Not installed",
   "dependency.action.opening": "Opening…",
+  "dependency.checking": "Checking required mods…",
 
   // ─── Workshop Updates ──────────────────────────────────────────────
   "update.title": "Workshop Update",

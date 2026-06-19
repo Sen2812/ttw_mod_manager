@@ -141,6 +141,8 @@ declare global {
       closeDecision: (choice: "save" | "discard" | "cancel") => void;
       onSaveBeforeClose: (callback: () => void) => void;
       onModsUpdated: (callback: (payload: ModsUpdatedPayload) => void) => void;
+      onPrerequisitesCheckStarted?: (callback: (modName: string) => void) => void;
+      onPrerequisitesCheckDone?: (callback: (modName: string) => void) => void;
       minimize?: () => void;
       maximize?: () => void;
       close?: () => void;

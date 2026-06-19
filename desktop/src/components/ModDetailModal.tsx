@@ -1,7 +1,8 @@
 import { useT } from "../i18n";
-import { X, ExternalLink, FolderOpen, Copy, Check, Package } from "lucide-react";
+import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
+import { useStore } from "../store";
 import type { Mod } from "../types";
 import ModCategorySelect from "./ModCategorySelect";
 import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
@@ -21,6 +22,7 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
   const t = useT();
   const [copied, setCopied] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
   const updateStatus = getModUpdateStatus(mod);
 
   const displayName = getModDisplayName(mod);
@@ -65,8 +67,8 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-morandi-text/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative card-morandi w-[480px] max-h-[85vh] overflow-hidden flex flex-col">
+      <div className="modal-backdrop" onClick={onClose} />
+      <div className="modal-panel w-[480px] max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-morandi-border-light">
           <h2 className="text-base font-semibold text-morandi-text truncate pr-4">{displayName}</h2>
@@ -196,7 +198,18 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
               </InfoField>
             )}
 
-            {(mod.reqModIdToName && mod.reqModIdToName.length > 0) && (
+            {isCheckingPrerequisites ? (
+              <InfoField label={t("moddetail.workshopPrerequisites")}>
+                <div className="space-y-1.5">
+                  <div className="prerequisite-skeleton" />
+                  <div className="prerequisite-skeleton w-4/5" />
+                </div>
+                <p className="text-[11px] text-morandi-accent mt-2 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  {t("dependency.checking")}
+                </p>
+              </InfoField>
+            ) : (mod.reqModIdToName && mod.reqModIdToName.length > 0) && (
               <InfoField label={t("moddetail.workshopPrerequisites")}>
                 <div className="space-y-1">
                   {mod.reqModIdToName.map(([id, name], i) => (

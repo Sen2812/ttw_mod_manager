@@ -203,6 +203,7 @@ export const zh: Record<string, string> = {
   "dependency.action.download": "去下载",
   "dependency.action.notInstalled": "未安装",
   "dependency.action.opening": "打开中…",
+  "dependency.checking": "正在检测必须 mod…",
 
   // ─── 工坊更新 ────────────────────────────────────────────────────────
   "update.title": "工坊更新",

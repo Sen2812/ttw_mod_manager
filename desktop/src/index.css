@@ -12,6 +12,17 @@
   ::-webkit-scrollbar-thumb:hover { background: #A89F91; }
 }
 
+@layer utilities {
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+}
+
 @layer components {
   .btn-morandi { @apply px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 bg-morandi-accent text-white hover:bg-morandi-accent-hover active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed; }
   .btn-morandi-ghost { @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97]; }
@@ -20,4 +31,7 @@
   .card-morandi { @apply bg-morandi-card rounded-xl border border-morandi-border-light shadow-morandi; }
   .input-morandi { @apply w-full px-3 py-2 rounded-lg text-sm bg-morandi-page border border-morandi-border text-morandi-text placeholder:text-morandi-text-muted focus:outline-none focus:ring-2 focus:ring-morandi-accent-light focus:border-transparent transition-all duration-150; }
   .drag-overlay { @apply bg-morandi-card rounded-lg shadow-morandi-lg border border-morandi-accent-light opacity-90 scale-[1.02]; }
+  .modal-backdrop { @apply absolute inset-0 bg-morandi-text/30 backdrop-blur-sm animate-[fadeIn_150ms_ease-out]; }
+  .modal-panel { @apply relative card-morandi animate-[modalIn_200ms_ease-out]; }
+  .prerequisite-skeleton { @apply h-7 rounded bg-morandi-sidebar animate-pulse; }
 }

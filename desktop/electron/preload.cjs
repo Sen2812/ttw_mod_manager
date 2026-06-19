@@ -52,6 +52,12 @@ const api = {
   onModsUpdated: (callback) => {
     ipcRenderer.on("mods-updated", (_e, payload) => callback(payload));
   },
+  onPrerequisitesCheckStarted: (callback) => {
+    ipcRenderer.on("prerequisites-check-started", (_e, modName) => callback(modName));
+  },
+  onPrerequisitesCheckDone: (callback) => {
+    ipcRenderer.on("prerequisites-check-done", (_e, modName) => callback(modName));
+  },
 };
 
 contextBridge.exposeInMainWorld("api", api);

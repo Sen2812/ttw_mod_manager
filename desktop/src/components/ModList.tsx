@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, memo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
 import { DndContext, closestCenter, KeyboardSensor, MouseSensor, useSensor, useSensors,
   DragEndEvent, DragOverlay, DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw } from "lucide-react";
+import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import type { Mod } from "../types";
 import ModDetailModal from "./ModDetailModal";
@@ -45,14 +45,16 @@ const ModRow = memo(function ModRow({
   const style = { transform: CSS.Transform.toString(transform), transition };
   // 仅订阅本行的覆盖统计，避免其他 mod 统计变化导致重渲染
   const stats = useStore(s => mod.isEnabled ? s.overwriteStats?.[mod.name] : undefined);
+  const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
 
   const displayName = getModDisplayName(mod);
   const hasWorkshopName = hasWorkshopDisplayName(mod);
 
   return (
     <div ref={setNodeRef} style={style}
-      className={clsx("group flex items-center gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-colors cursor-pointer hover:bg-morandi-hover/50",
+      className={clsx("group flex items-center gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50",
         isSortDragging && "opacity-50",
+        isCheckingPrerequisites && "bg-morandi-accent-light/15",
         mod.isEnabled ? "bg-morandi-card" : "bg-morandi-page/50")}
       onDoubleClick={() => onShowDetail(mod)}>
       <div {...attributes} {...listeners}
@@ -60,9 +62,18 @@ const ModRow = memo(function ModRow({
         <GripVertical className="w-4 h-4 text-morandi-text-muted" />
       </div>
       <button onClick={(e) => { e.stopPropagation(); onToggle(mod); }}
+        disabled={isCheckingPrerequisites && !mod.isEnabled}
+        title={isCheckingPrerequisites ? t("dependency.checking") : undefined}
         className={clsx("w-5 h-5 rounded border-2 flex items-center justify-center transition-all shrink-0",
-          mod.isEnabled ? "bg-morandi-success border-morandi-success" : "border-morandi-border hover:border-morandi-accent-light")}>
-        {mod.isEnabled && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+          isCheckingPrerequisites && "border-morandi-accent-light bg-morandi-accent-light/30",
+          !isCheckingPrerequisites && mod.isEnabled && "bg-morandi-success border-morandi-success",
+          !isCheckingPrerequisites && !mod.isEnabled && "border-morandi-border hover:border-morandi-accent-light",
+          isCheckingPrerequisites && "cursor-wait")}>
+        {isCheckingPrerequisites ? (
+          <Loader2 className="w-3 h-3 text-morandi-accent animate-spin" />
+        ) : mod.isEnabled ? (
+          <Check className="w-3 h-3 text-white" strokeWidth={3} />
+        ) : null}
       </button>
       {/* 工坊封面图片 — lazy 加载 */}
       <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
@@ -96,6 +107,11 @@ const ModRow = memo(function ModRow({
       </div>
       {/* 冲突 / 更新 / 依赖：位于种类选择器左侧 */}
       <div className="flex items-center gap-0.5 shrink-0">
+        {isCheckingPrerequisites && (
+          <span className="p-1 text-morandi-accent" title={t("dependency.checking")}>
+            <Loader2 className="w-4 h-4 animate-spin" />
+          </span>
+        )}
         {hasUpdate && (
           <button
             onClick={(e) => { e.stopPropagation(); onShowUpdate(mod.name); }}
@@ -199,6 +215,21 @@ export default function ModList() {
   const loadMode = useViewModeStore(s => s.loadMode);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
+  const pendingDependencyAlertRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const onDone = (modName: string) => {
+      if (pendingDependencyAlertRef.current !== modName) return;
+      pendingDependencyAlertRef.current = null;
+      const { mods: currentMods, subscribedWorkshopIds: subs } = useStore.getState();
+      const updated = currentMods.find(m => m.name === modName);
+      if (updated?.isEnabled) {
+        const report = getModDependencyReport(updated, currentMods, subs);
+        if (report) openDependencyAlert([report]);
+      }
+    };
+    window.api.onPrerequisitesCheckDone?.(onDone);
+  }, [openDependencyAlert]);
 
   // 切换 game / profile 时自动加载已记忆的显示模式
   useEffect(() => {
@@ -248,23 +279,24 @@ export default function ModList() {
   // 稳定的回调，避免 memo 化的 ModRow 因 props 变化而重渲染
   const handleToggle = useCallback(async (mod: Mod) => {
     const wasEnabled = mod.isEnabled;
+    if (!wasEnabled) {
+      pendingDependencyAlertRef.current = mod.name;
+    } else if (pendingDependencyAlertRef.current === mod.name) {
+      pendingDependencyAlertRef.current = null;
+    }
     try {
       const result = await window.api.toggleMod(mod.name);
       if (Array.isArray(result)) {
         setMods(result);
         markDirty();
-        if (!wasEnabled) {
-          const updated = result.find(m => m.name === mod.name);
-          if (updated?.isEnabled) {
-            const report = getModDependencyReport(updated, result, subscribedWorkshopIds);
-            if (report) openDependencyAlert([report]);
-          }
-        }
       }
     } catch (e) {
+      if (pendingDependencyAlertRef.current === mod.name) {
+        pendingDependencyAlertRef.current = null;
+      }
       console.error("Failed to toggle mod:", e);
     }
-  }, [setMods, markDirty, subscribedWorkshopIds, openDependencyAlert]);
+  }, [setMods, markDirty]);
 
   const handleShowDetail = useCallback((mod: Mod) => {
     setSelectedMod(mod);
