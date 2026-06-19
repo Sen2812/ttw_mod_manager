@@ -13,6 +13,7 @@ import { readPackHeader, NodeBinaryReader } from "../pack-file";
 import { readLauncherModNameIndex } from "../launcher/launcher-sync";
 import { fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
 import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
+import { formatSteamFetchSkipReason, isSteamIpcUnavailableError } from "./steam-ipc-error";
 import { fetchSubscribedWorkshopIds } from "./workshop-subscriptions-fetcher";
 import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
 import {
@@ -314,7 +315,11 @@ async function ensureWorkshopRequiredIds(
     cache.save();
     log?.("Workshop required mods cached");
   } catch (e) {
-    log?.(`Workshop required mods: Steam fetch failed: ${e}`);
+    if (isSteamIpcUnavailableError(e)) {
+      log?.(`Workshop required mods: ${formatSteamFetchSkipReason(e)} — using cache if available`);
+    } else {
+      log?.(`Workshop required mods: Steam fetch failed: ${e}`);
+    }
     for (const id of needsFetch) {
       cache.setRequiredIds(id, [], true);
     }
@@ -1097,7 +1102,11 @@ export async function ensureModPrerequisites(
       }
       cache.save();
     } catch (e) {
-      log?.(`Failed to ensure required mods for ${modName}: ${e}`);
+      if (isSteamIpcUnavailableError(e)) {
+        log?.(`Required mods for ${modName}: ${formatSteamFetchSkipReason(e)} — using cache if available`);
+      } else {
+        log?.(`Failed to ensure required mods for ${modName}: ${e}`);
+      }
       cache.setRequiredIds(workshopId, [], true);
       cache.save();
     }

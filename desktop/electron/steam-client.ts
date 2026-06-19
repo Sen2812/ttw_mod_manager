@@ -6,6 +6,19 @@ import { fileURLToPath } from "url";
 
 const STEAM_SUB_TIMEOUT_MS = 120_000;
 const STEAM_DOWNLOAD_TIMEOUT_MS = 30_000;
+const STEAM_PING_TIMEOUT_MS = 8_000;
+
+/** Thrown when Steam process exists but steamworks IPC is unavailable (e.g. offline mode). */
+export class SteamIpcUnavailableError extends Error {
+  constructor(detail?: string) {
+    super(detail ?? "Steam IPC unavailable");
+    this.name = "SteamIpcUnavailableError";
+  }
+}
+
+export function isSteamIpcErrorMessage(message: string): boolean {
+  return /ipc pipe|steam is probably not running/i.test(message);
+}
 
 /** Serialize steam-sub calls — concurrent steamworks.init() can disrupt active downloads. */
 let steamSubChain: Promise<unknown> = Promise.resolve();
@@ -85,6 +98,30 @@ function runSteamSub<T extends Record<string, unknown>>(
   return next;
 }
 
+/** Check whether steamworks can connect to the running Steam client. */
+export async function probeSteamIpc(appId: number): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const msg = await runSteamSub<{ ok?: boolean; error?: string }>(
+      appId,
+      "ping",
+      undefined,
+      STEAM_PING_TIMEOUT_MS,
+    );
+    if (msg.ok) return { ok: true };
+    return { ok: false, error: msg.error ?? "Steam IPC unavailable" };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    return { ok: false, error };
+  }
+}
+
+async function ensureSteamIpc(appId: number): Promise<void> {
+  const probe = await probeSteamIpc(appId);
+  if (!probe.ok) {
+    throw new SteamIpcUnavailableError(probe.error);
+  }
+}
+
 /** Fetch workshop required mod IDs via steamworks.js (Steam client must be running). */
 export async function fetchWorkshopDependenciesViaSteam(
   appId: number,
@@ -92,6 +129,7 @@ export async function fetchWorkshopDependenciesViaSteam(
 ): Promise<Map<string, string[]>> {
   if (workshopIds.length === 0) return new Map();
 
+  await ensureSteamIpc(appId);
   const msg = await runSteamSub<Record<string, string[]>>(
     appId,
     "getDependencies",
@@ -107,6 +145,7 @@ export async function fetchWorkshopDependenciesViaSteam(
 
 /** Fetch currently subscribed workshop item IDs via steamworks.js. */
 export async function fetchSubscribedWorkshopIdsViaSteam(appId: number): Promise<string[]> {
+  await ensureSteamIpc(appId);
   const msg = await runSteamSub<{ ids?: string[] }>(appId, "getSubscribed");
   return Array.isArray(msg.ids) ? msg.ids : [];
 }

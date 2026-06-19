@@ -419,7 +419,10 @@ function registerIpc() {
     return buildBootstrapPayload();
   });
 
-  ipcMain.handle("get-steam-status", async () => getSteamClientStatus());
+  ipcMain.handle("get-steam-status", async () => {
+    const appId = getCurrentSteamAppId();
+    return getSteamClientStatus(appId);
+  });
 
   // ── 配置 ─────────────────────────────────────────────────────────────────
   ipcMain.handle("get-config", async () => {

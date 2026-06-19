@@ -33,8 +33,9 @@ export const zh: Record<string, string> = {
   "topbar.launchSaveAndLaunch": "保存并启动",
   "topbar.launchWithoutSaving": "不保存直接启动",
   "steamStatus.label": "Steam",
-  "steamStatus.runningTooltip": "Steam 客户端正在运行",
-  "steamStatus.notRunningTooltip": "Steam 客户端未运行 — 工坊订阅与下载功能可能不可用",
+  "steamStatus.runningTooltip": "Steam 客户端已连接",
+  "steamStatus.offlineTooltip": "Steam 正在运行但处于离线 — 工坊 API 不可用，请上线后重试",
+  "steamStatus.notRunningTooltip": "Steam 客户端未运行 — 工坊功能可能不可用",
   "close.unsavedTitle": "有未保存的修改",
   "close.unsavedMsg": "退出前是否保存当前修改？",
 

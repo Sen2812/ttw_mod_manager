@@ -104,7 +104,12 @@ declare global {
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
       resetLoadOrder: () => Promise<Mod[] | ApiResponse>;
       getConfig: () => Promise<AppConfigResponse>;
-      getSteamStatus: () => Promise<{ installed: boolean; running: boolean }>;
+      getSteamStatus: () => Promise<{
+        installed: boolean;
+        running: boolean;
+        ipcAvailable: boolean;
+        state: "not_installed" | "not_running" | "offline" | "online";
+      }>;
       setGame: (g: string) => Promise<{ mods?: Mod[]; presets?: Preset[]; folderPaths?: AppConfigResponse["folderPaths"]; game?: GameInfo; error?: string; subscribedWorkshopIds?: string[] }>;
       getPresets: () => Promise<Preset[]>;
       createPreset: (n: string, copyFromCurrent?: boolean) => Promise<Preset[] | ApiResponse>;

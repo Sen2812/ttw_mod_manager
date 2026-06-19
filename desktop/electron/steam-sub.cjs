@@ -223,4 +223,13 @@ if (command === "getDependencies") {
   }
   if (process.send) process.send({ results });
   setTimeout(() => process.exit(0), 200);
+} else if (command === "ping") {
+  const appId = Number(process.argv[2]);
+  try {
+    steamworks.init(appId);
+    if (process.send) process.send({ ok: true });
+  } catch (e) {
+    if (process.send) process.send({ ok: false, error: String(e) });
+  }
+  setTimeout(() => process.exit(0), 200);
 }

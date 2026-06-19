@@ -31,6 +31,5 @@ export async function fetchWorkshopRequiredIds(
   if (!fetcher) {
     throw new Error("Steam client fetcher not configured");
   }
-  log?.(`Steam client: querying required mods for ${ids.length} workshop item(s)...`);
   return fetcher(ids, game, log);
 }
