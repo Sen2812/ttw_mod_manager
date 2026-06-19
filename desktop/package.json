@@ -56,7 +56,18 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
+      "steamworks/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "steamworks/**",
+      "dist-electron/steam-sub.cjs"
+    ],
+    "extraFiles": [
+      {
+        "from": "steamworks/dist/win64/steam_api64.dll",
+        "to": "."
+      }
     ],
     "extraResources": [
       {

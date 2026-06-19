@@ -4,6 +4,7 @@ export * from "./preset-manager";
 export * from "./mod-manager";
 export * from "./dependency-checker";
 export * from "./workshop-dependencies";
+export * from "./workshop-required-fetcher";
 export * from "./workshop-cache";
 export * from "./category-utils";
 export * from "./workshop-update-status";

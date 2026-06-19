@@ -11,10 +11,12 @@ import * as https from "https";
 import { GameDefinition, GameFolderPaths, Mod } from "../types";
 import { readPackHeader, NodeBinaryReader } from "../pack-file";
 import { readLauncherModNameIndex } from "../launcher/launcher-sync";
-import { fetchWorkshopRequiredIdsCombined, fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
+import { fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
+import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
 import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
 import {
   WorkshopCache,
+  REQUIRED_IDS_CACHE_GENERATION,
   type WorkshopItemData,
   type WorkshopFetchMode,
 } from "./workshop-cache";
@@ -22,14 +24,14 @@ import { normalizeWorkshopTags } from "./category-utils";
 import { applyWorkshopTimeUpdatedToMods } from "./workshop-update-status";
 
 export type { WorkshopItemData, WorkshopFetchMode };
-export { WorkshopCache, METADATA_TTL_MS, REQUIRED_IDS_TTL_MS } from "./workshop-cache";
+export { WorkshopCache, METADATA_TTL_MS, REQUIRED_IDS_TTL_MS, REQUIRED_IDS_CACHE_GENERATION } from "./workshop-cache";
 
 export type LogCallback = (msg: string) => void;
 
 /** Delay between Steam Web API batches to avoid burst traffic. */
 const API_BATCH_DELAY_MS = 1200;
-/** Delay between workshop HTML prerequisite fetches. */
-const REQUIRED_FETCH_DELAY_MS = 1500;
+/** Delay between workshop HTML title fetches (display names only, not required mods). */
+const TITLE_FETCH_DELAY_MS = 1500;
 
 function isNumericWorkshopId(id: string | undefined): id is string {
   return !!id && /^\d{5,15}$/.test(id);
@@ -148,6 +150,48 @@ export async function fetchWorkshopMetadata(
   return result;
 }
 
+function isUnavailableWorkshopEntry(entry: WorkshopItemData | undefined): boolean {
+  if (!entry) return false;
+  if (entry.metadataUnavailable) return true;
+  return entry.apiResult !== undefined && entry.apiResult !== 1;
+}
+
+/** Drop required mod IDs that Steam reports as removed or inaccessible. */
+function filterRequiredIdsFromCache(requiredIds: string[], cache: WorkshopCache): string[] {
+  return requiredIds.filter(id => !isUnavailableWorkshopEntry(cache.get(id)));
+}
+
+/** Resolve availability via cache + Steam Web API, then return valid required IDs only. */
+async function validateRequiredWorkshopIds(
+  requiredIds: string[],
+  cacheDir: string,
+  cache: WorkshopCache,
+  log?: LogCallback,
+): Promise<string[]> {
+  const unique = [...new Set(requiredIds)];
+  if (unique.length === 0) return [];
+
+  const needsCheck = unique.filter(id => {
+    const entry = cache.get(id);
+    if (!entry) return true;
+    if (isUnavailableWorkshopEntry(entry)) return false;
+    if (entry.metadataFetchedAt !== undefined) return false;
+    if (entry.title) return false;
+    return true;
+  });
+
+  if (needsCheck.length > 0) {
+    await getWorkshopMetadata(needsCheck, cacheDir, log, "routine", cache);
+  }
+
+  const valid = unique.filter(id => !isUnavailableWorkshopEntry(cache.get(id)));
+  const removed = unique.length - valid.length;
+  if (removed > 0) {
+    log?.(`Workshop required mods: removed ${removed} unavailable item(s)`);
+  }
+  return valid;
+}
+
 /** Seed cache from locally available mod info to avoid API calls. */
 function seedCacheFromLocalMods(mods: Mod[], cache: WorkshopCache): void {
   const seeds: [string, Partial<WorkshopItemData>][] = [];
@@ -171,7 +215,7 @@ export async function getWorkshopMetadata(
   mode: WorkshopFetchMode = "routine",
   existing?: WorkshopCache,
 ): Promise<Map<string, WorkshopItemData>> {
-  const cache = existing ?? new WorkshopCache(cacheDir).load();
+  const cache = existing ?? new WorkshopCache(cacheDir).load(log);
   const needsFetch = cache.idsNeedingMetadata(workshopIds, mode);
 
   if (needsFetch.length === 0) {
@@ -215,7 +259,7 @@ export async function checkWorkshopUpdates(
   )];
   if (workshopIds.length === 0) return;
 
-  const cache = existing ?? new WorkshopCache(cacheDir).load();
+  const cache = existing ?? new WorkshopCache(cacheDir).load(log);
   const needsFetch = force ? workshopIds : cache.idsNeedingUpdateCheck(workshopIds);
 
   if (needsFetch.length === 0) {
@@ -237,9 +281,11 @@ export async function checkWorkshopUpdates(
   log?.("Workshop update check complete");
 }
 
-/** Fetch prerequisite IDs only for items not yet in cache. Sequential with delay. */
+/** Fetch required mod IDs via the registered Steam client fetcher. */
 async function ensureWorkshopRequiredIds(
   ids: string[],
+  game: GameDefinition,
+  cacheDir: string,
   cache: WorkshopCache,
   log?: LogCallback,
   mode: WorkshopFetchMode = "routine",
@@ -248,29 +294,32 @@ async function ensureWorkshopRequiredIds(
   if (needsFetch.length === 0) return;
 
   log?.(
-    `Workshop prerequisites: fetching ${needsFetch.length} item(s) `
+    `Workshop required mods: fetching ${needsFetch.length} item(s) via Steam client `
     + `(${ids.length - needsFetch.length} cached)`,
   );
 
-  for (let i = 0; i < needsFetch.length; i++) {
-    if (i > 0) await sleep(REQUIRED_FETCH_DELAY_MS);
-    const id = needsFetch[i];
-    try {
-      const { requiredIds, fetchFailed } = await fetchWorkshopRequiredIdsCombined(id);
-      cache.setRequiredIds(id, requiredIds, fetchFailed);
-    } catch (e) {
-      log?.(`  Failed to fetch prerequisites for ${id}: ${e}`);
+  try {
+    const fetched = await fetchWorkshopRequiredIds(needsFetch, game, log);
+    for (const id of needsFetch) {
+      const raw = fetched.get(id) ?? [];
+      const requiredIds = await validateRequiredWorkshopIds(raw, cacheDir, cache, log);
+      cache.setRequiredIds(id, requiredIds, false);
+    }
+    cache.save();
+    log?.("Workshop required mods cached");
+  } catch (e) {
+    log?.(`Workshop required mods: Steam fetch failed: ${e}`);
+    for (const id of needsFetch) {
       cache.setRequiredIds(id, [], true);
     }
+    cache.save();
   }
-
-  cache.save();
-  log?.("Workshop prerequisites cached");
 }
 
 /** Resolve prerequisite titles and apply reqModIds to mods. */
 async function applyWorkshopDependencies(
   mods: Mod[],
+  game: GameDefinition,
   cache: WorkshopCache,
   cacheDir: string,
   subscribedWorkshopIds: string[],
@@ -279,11 +328,11 @@ async function applyWorkshopDependencies(
 ): Promise<void> {
   const workshopModIds = collectWorkshopItemIds(mods, subscribedWorkshopIds);
 
-  await ensureWorkshopRequiredIds(workshopModIds, cache, log, mode);
+  await ensureWorkshopRequiredIds(workshopModIds, game, cacheDir, cache, log, mode);
 
   const allRequired = new Set<string>();
   for (const id of workshopModIds) {
-    for (const req of cache.get(id)?.requiredIds ?? []) {
+    for (const req of filterRequiredIdsFromCache(cache.get(id)?.requiredIds ?? [], cache)) {
       allRequired.add(req);
     }
   }
@@ -298,7 +347,7 @@ async function applyWorkshopDependencies(
   for (const mod of mods) {
     const workshopId = resolveModWorkshopId(mod);
     if (!workshopId) continue;
-    const requiredIds = data.get(workshopId)?.requiredIds ?? [];
+    const requiredIds = filterRequiredIdsFromCache(data.get(workshopId)?.requiredIds ?? [], cache);
     if (requiredIds.length === 0) continue;
     mod.reqModIds = requiredIds;
     mod.reqModIdToName = requiredIds.map(id => [id, data.get(id)?.title ?? id]);
@@ -668,7 +717,7 @@ async function fetchMissingWorkshopTitles(
 
   log?.(`Workshop titles: fetching ${pending.length} missing name(s) from workshop pages...`);
   for (const mod of pending) {
-    await sleep(REQUIRED_FETCH_DELAY_MS);
+    await sleep(TITLE_FETCH_DELAY_MS);
     try {
       const html = await fetchWorkshopHtml(mod.workshopId);
       const title = parseWorkshopTitle(html);
@@ -793,7 +842,7 @@ function applyCachedWorkshopDependencies(mods: Mod[], cache: WorkshopCache): voi
   for (const mod of mods) {
     const workshopId = resolveModWorkshopId(mod);
     if (!workshopId) continue;
-    const requiredIds = data.get(workshopId)?.requiredIds ?? [];
+    const requiredIds = filterRequiredIdsFromCache(data.get(workshopId)?.requiredIds ?? [], cache);
     if (requiredIds.length === 0) continue;
     mod.reqModIds = requiredIds;
     mod.reqModIdToName = requiredIds.map(id => [id, data.get(id)?.title ?? id]);
@@ -829,7 +878,7 @@ export async function enrichWorkshopNetwork(
   if (workshopIds.length === 0 || !cacheDir) return;
 
   try {
-    const cache = new WorkshopCache(cacheDir).load();
+    const cache = new WorkshopCache(cacheDir).load(log);
     seedCacheFromLocalMods(mods, cache);
     cache.save();
 
@@ -852,7 +901,7 @@ export async function enrichWorkshopNetwork(
     applyWorkshopTimeUpdatedToMods(mods, workshopData);
     await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
 
-    await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
+    await applyWorkshopDependencies(mods, game, cache, cacheDir, workshopIds, log);
 
     log?.("Workshop network enrichment complete");
   } catch (e) {
@@ -878,16 +927,23 @@ export async function ensureModPrerequisites(
   const workshopId = resolveModWorkshopId(mod);
   if (!workshopId) return;
 
-  const cache = new WorkshopCache(cacheDir).load();
+  const cache = new WorkshopCache(cacheDir).load(log);
   const entry = cache.get(workshopId);
   const shouldFetch = !mod.reqModIds?.length
     || entry?.requiredIds === undefined
-    || entry.requiredIdsFetchFailed;
+    || entry?.requiredIdsFetchFailed
+    || entry?.requiredIdsCacheGeneration !== REQUIRED_IDS_CACHE_GENERATION;
 
   if (shouldFetch) {
     try {
-      const { requiredIds, fetchFailed } = await fetchWorkshopRequiredIdsCombined(workshopId);
-      cache.setRequiredIds(workshopId, requiredIds, fetchFailed);
+      const fetched = await fetchWorkshopRequiredIds([workshopId], game, log);
+      const requiredIds = await validateRequiredWorkshopIds(
+        fetched.get(workshopId) ?? [],
+        cacheDir,
+        cache,
+        log,
+      );
+      cache.setRequiredIds(workshopId, requiredIds, false);
 
       const missingTitles = requiredIds.filter(id => !cache.has(id) || !cache.get(id)!.title);
       if (missingTitles.length > 0) {
@@ -895,7 +951,9 @@ export async function ensureModPrerequisites(
       }
       cache.save();
     } catch (e) {
-      log?.(`Failed to ensure prerequisites for ${modName}: ${e}`);
+      log?.(`Failed to ensure required mods for ${modName}: ${e}`);
+      cache.setRequiredIds(workshopId, [], true);
+      cache.save();
     }
   }
 
@@ -1000,7 +1058,7 @@ export async function scanMods(
   // Workshop metadata & prerequisites — cache-first; network optional when deferNetwork.
   if (workshopIds.length > 0 && cacheDir) {
     try {
-      const cache = new WorkshopCache(cacheDir).load();
+      const cache = new WorkshopCache(cacheDir).load(log);
       seedCacheFromLocalMods(mods, cache);
       cache.save();
 
@@ -1026,7 +1084,7 @@ export async function scanMods(
         applyWorkshopTimeUpdatedToMods(mods, workshopData);
         await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
 
-        await applyWorkshopDependencies(mods, cache, cacheDir, workshopIds, log);
+        await applyWorkshopDependencies(mods, game, cache, cacheDir, workshopIds, log);
 
         log?.("Workshop cache applied");
       }

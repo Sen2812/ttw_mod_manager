@@ -12,6 +12,8 @@ import { generateUsedModsContent } from "../../core/src/launcher/used-mods";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
+import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
+import { fetchWorkshopDependenciesViaSteam } from "./steam-client";
 
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
@@ -95,7 +97,7 @@ function notifyModsUpdated(): void {
   });
 }
 
-/** Background workshop API/HTML fetches and update checks after first paint. */
+/** Background workshop metadata sync and update checks after first paint. */
 async function runDeferredWorkshopEnrichment(): Promise<void> {
   const gen = ++deferredWorkshopGeneration;
   try {
@@ -708,6 +710,12 @@ app.whenReady().then(async () => {
 
   appLog = createAppLogger(path.join(dataDir, APP_LOG_FILE));
   appLog("Application starting...");
+
+  setWorkshopRequiredIdsFetcher(async (ids, game) => {
+    const appId = Number(game.steamId);
+    if (!appId) return new Map();
+    return fetchWorkshopDependenciesViaSteam(appId, ids);
+  });
 
   mm = new ModManager({ configDir: dataDir, log: msg => appLog(`[core] ${msg}`) });
   registerIpc();

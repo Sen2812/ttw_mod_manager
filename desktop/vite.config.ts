@@ -6,13 +6,21 @@ import renderer from "vite-plugin-electron-renderer";
 import path from "path";
 import { copyFileSync, mkdirSync } from "fs";
 
-function copyPreloadCjs(): void {
+function copyElectronAssets(): void {
   const outDir = path.resolve(__dirname, "dist-electron");
   mkdirSync(outDir, { recursive: true });
-  copyFileSync(
-    path.resolve(__dirname, "electron/preload.cjs"),
-    path.join(outDir, "preload.cjs"),
-  );
+  for (const file of ["preload.cjs", "steam-sub.cjs"]) {
+    copyFileSync(
+      path.resolve(__dirname, `electron/${file}`),
+      path.join(outDir, file),
+    );
+  }
+  const steamDll = path.resolve(__dirname, "steamworks/dist/win64/steam_api64.dll");
+  try {
+    copyFileSync(steamDll, path.join(outDir, "steam_api64.dll"));
+  } catch {
+    // optional in dev if steamworks not present
+  }
 }
 
 const electronBuild = {
@@ -24,12 +32,12 @@ export default defineConfig({
   plugins: [
     react(),
     {
-      name: "copy-preload-cjs",
+      name: "copy-electron-assets",
       buildStart() {
-        copyPreloadCjs();
+        copyElectronAssets();
       },
       closeBundle() {
-        copyPreloadCjs();
+        copyElectronAssets();
       },
     },
     electron([
