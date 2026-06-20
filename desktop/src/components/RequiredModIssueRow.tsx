@@ -1,16 +1,13 @@
 import { useState } from "react";
+import { useStore } from "../store";
 import { useT } from "../i18n";
-import { ExternalLink } from "lucide-react";
+import { DownloadCloud, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import type { DependencyIssue } from "@core/mod-manager/dependency-checker";
 import type { Mod } from "../types";
 
 function shortPack(name: string): string {
   return name.replace(/\.pack$/i, "");
-}
-
-function workshopUrl(id: string): string {
-  return `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
 }
 
 interface RequiredModIssueRowProps {
@@ -35,13 +32,21 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
     }
   };
 
-  const handleOpenWorkshop = async () => {
+  /** Subscribe or download via Steamworks — no browser / workshop page. */
+  const handleSteamWorkshop = async () => {
     if (issue.kind !== "workshop" || busy) return;
     setBusy(true);
     try {
-      await window.api.openUrl(workshopUrl(issue.id));
+      const result = await window.api.triggerWorkshopDownload(issue.id);
+      if (Array.isArray(result.mods)) onModsUpdated(result.mods);
+      if (result.subscribedWorkshopIds) {
+        useStore.setState({ subscribedWorkshopIds: result.subscribedWorkshopIds });
+      }
+      if (!result.ok && result.error) {
+        console.error("Steam workshop action failed:", result.error);
+      }
     } catch (e) {
-      console.error("Failed to open workshop URL:", e);
+      console.error("Failed to subscribe/download workshop mod:", e);
     } finally {
       setBusy(false);
     }
@@ -99,16 +104,18 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
         </div>
         <button
           type="button"
-          onClick={handleOpenWorkshop}
-          disabled={busy || issue.kind !== "workshop"}
+          onClick={handleSteamWorkshop}
+          disabled={busy}
           className={clsx(
             "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
             "bg-morandi-accent-light/50 text-morandi-accent hover:bg-morandi-accent-light transition-colors",
             "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
-          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-          {busy ? t("dependency.action.opening") : t("dependency.action.subscribe")}
+          {busy
+            ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+            : <DownloadCloud className="w-3.5 h-3.5 shrink-0" />}
+          {busy ? t("dependency.action.subscribing") : t("dependency.action.subscribe")}
         </button>
       </li>
     );
@@ -124,16 +131,18 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
         </div>
         <button
           type="button"
-          onClick={handleOpenWorkshop}
+          onClick={handleSteamWorkshop}
           disabled={busy}
           className={clsx(
             "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
             "bg-morandi-warning-light/40 text-morandi-warning hover:bg-morandi-warning-light/60 transition-colors",
-            busy && "opacity-60",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
-          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-          {busy ? t("dependency.action.opening") : t("dependency.action.download")}
+          {busy
+            ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+            : <DownloadCloud className="w-3.5 h-3.5 shrink-0" />}
+          {busy ? t("dependency.action.downloading") : t("dependency.action.download")}
         </button>
       </li>
     );

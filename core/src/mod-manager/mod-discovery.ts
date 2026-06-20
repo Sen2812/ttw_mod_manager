@@ -1052,7 +1052,8 @@ export async function enrichWorkshopNetwork(
     applyWorkshopTimeUpdatedToMods(mods, workshopData);
     await checkWorkshopUpdates(mods, cacheDir, log, false, cache);
 
-    await applyWorkshopDependencies(mods, game, cache, cacheDir, workshopIds, log);
+    // Required-mod IDs are fetched on demand when the user enables a mod,
+    // not during background startup enrichment.
 
     log?.("Workshop network enrichment complete");
   } catch (e) {

@@ -541,7 +541,6 @@ function registerIpc() {
     mm.mods = sortByLoadOrder(mm.mods);
     return mm.getMods();
   });
-  ipcMain.handle("reset-load-order", () => { mm.resetLoadOrder(); return mm.getMods(); });
 
   // ── 分类 ─────────────────────────────────────────────────────────────────
   ipcMain.handle("get-categories", () => mm.getCategories());
@@ -573,14 +572,15 @@ function registerIpc() {
     await ensureInit();
     const appId = getCurrentSteamAppId();
     if (!appId || !/^\d{5,15}$/.test(workshopId)) {
-      return { ok: false, error: "INVALID", mods: mm.getMods() };
+      return { ok: false, error: "INVALID", mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
     }
+    const payload = () => ({ mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds });
     try {
       if (pendingDownloadLocked.has(workshopId)) {
         mm.mods = await applyPendingDownloadStatus(mm.getMods());
         startPendingDownloadPoll();
         notifyModsUpdated();
-        return { ok: true, inProgress: true, mods: mm.getMods() };
+        return { ok: true, inProgress: true, ...payload() };
       }
       unlockPendingDownload(workshopId);
       lockPendingDownload(workshopId);
@@ -589,10 +589,10 @@ function registerIpc() {
       mm.mods = await applyPendingDownloadStatus(mm.getMods());
       startPendingDownloadPoll();
       notifyModsUpdated();
-      return { ok: true, mods: mm.getMods() };
+      return { ok: true, ...payload() };
     } catch (e: any) {
       unlockPendingDownload(workshopId);
-      return { ok: false, error: e?.message ?? String(e), mods: mm.getMods() };
+      return { ok: false, error: e?.message ?? String(e), ...payload() };
     }
   });
   ipcMain.handle("force-update-all-outdated", async () => {

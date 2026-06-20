@@ -67,7 +67,6 @@ export const en: Record<string, string> = {
   "modlist.filterPlaceholder": "Filter mods...",
   "modlist.allOn": "All On",
   "modlist.allOff": "All Off",
-  "modlist.reset": "Reset",
   "modlist.importLocal": "Import",
   "modlist.importLocalTooltip": "Select .pack files from your computer and copy them into the game's data/modding/ folder",
   "modlist.importResult": "Imported {n} mod(s)",
@@ -232,9 +231,10 @@ export const en: Record<string, string> = {
   "dependency.action.enable": "Enable",
   "dependency.action.enabling": "Enabling…",
   "dependency.action.subscribe": "Subscribe",
+  "dependency.action.subscribing": "Subscribing…",
   "dependency.action.download": "Download",
+  "dependency.action.downloading": "Downloading…",
   "dependency.action.notInstalled": "Not installed",
-  "dependency.action.opening": "Opening…",
   "dependency.checking": "Checking required mods…",
 
   // ─── Workshop Updates ──────────────────────────────────────────────

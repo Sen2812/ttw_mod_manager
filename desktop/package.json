@@ -18,7 +18,8 @@
     "preview": "vite preview",
     "postinstall": "node ./node_modules/electron/install.js",
     "dist": "npm run build && electron-builder --win",
-    "dist:dir": "npm run build && electron-builder --win --dir"
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/render-icon.ps1"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

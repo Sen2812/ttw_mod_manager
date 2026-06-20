@@ -593,14 +593,6 @@ export class ModManager {
     adjustDuplicateLoadOrders(this.mods, mod);
     this.mods = sortByLoadOrder(this.mods);
   }
-
-  /** Reset load order for all mods (back to alphabetical) */
-  resetLoadOrder(): void {
-    for (const mod of this.mods) {
-      mod.loadOrder = undefined;
-    }
-    this.mods = sortByLoadOrder(this.mods);
-  }
   setAlwaysEnabledMods(modNames: string[]): void {
     this.config.alwaysEnabledMods = modNames.map((name) => ({ name }));
     const nameSet = new Set(modNames);

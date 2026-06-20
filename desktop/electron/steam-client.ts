@@ -184,6 +184,7 @@ export async function triggerWorkshopDownloadsViaSteam(
   workshopIds: string[],
 ): Promise<Map<string, WorkshopDownloadTriggerResult>> {
   if (workshopIds.length === 0) return new Map();
+  await ensureSteamIpc(appId);
   const msg = await runSteamSub<{ results?: Record<string, WorkshopDownloadTriggerResult> }>(
     appId,
     "downloadItems",

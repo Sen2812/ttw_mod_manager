@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Master icon  square canvas, no rounded outer corners (OS applies its own mask).
+  Keep main artwork inside the center ~80% for taskbar / small-size clarity.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <rect width="1024" height="1024" fill="#F5F0EB"/>
+  <!-- Mod stack: three layers, bold shapes for 16px taskbar legibility -->
+  <rect x="272" y="592" width="480" height="112" rx="28" fill="#B0A89E"/>
+  <rect x="240" y="456" width="480" height="112" rx="28" fill="#8B7E74"/>
+  <rect x="208" y="320" width="480" height="112" rx="28" fill="#8FA68E"/>
+  <!-- Priority marker on top layer -->
+  <circle cx="608" cy="376" r="28" fill="#F5F0EB"/>
+</svg>

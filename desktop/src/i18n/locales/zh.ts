@@ -67,7 +67,6 @@ export const zh: Record<string, string> = {
   "modlist.filterPlaceholder": "搜索 mod...",
   "modlist.allOn": "全启用",
   "modlist.allOff": "全禁用",
-  "modlist.reset": "重置顺序",
   "modlist.importLocal": "导入",
   "modlist.importLocalTooltip": "从电脑中选择 .pack 文件，复制到游戏的 data/modding/ 目录",
   "modlist.importResult": "已导入 {n} 个 mod",
@@ -231,10 +230,11 @@ export const zh: Record<string, string> = {
   "dependency.status.ok": "已满足",
   "dependency.action.enable": "启用",
   "dependency.action.enabling": "启用中…",
-  "dependency.action.subscribe": "去订阅",
-  "dependency.action.download": "去下载",
+  "dependency.action.subscribe": "订阅",
+  "dependency.action.subscribing": "订阅中…",
+  "dependency.action.download": "下载",
+  "dependency.action.downloading": "下载中…",
   "dependency.action.notInstalled": "未安装",
-  "dependency.action.opening": "打开中…",
   "dependency.checking": "正在检测必须 mod…",
 
   // ─── 工坊更新 ────────────────────────────────────────────────────────

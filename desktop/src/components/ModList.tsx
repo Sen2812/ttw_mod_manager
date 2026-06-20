@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, RotateCcw, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
+import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
@@ -382,6 +382,9 @@ export default function ModList() {
     try {
       const result = await window.api.triggerWorkshopDownload(mod.workshopId);
       if (Array.isArray(result.mods)) setMods(result.mods);
+      if (result.subscribedWorkshopIds) {
+        useStore.setState({ subscribedWorkshopIds: result.subscribedWorkshopIds });
+      }
     } catch (e) {
       console.error("Failed to trigger workshop download:", e);
     }
@@ -460,13 +463,6 @@ export default function ModList() {
       if (Array.isArray(result)) { setMods(result); markDirty(); }
     } catch (e) { console.error("Failed to disable all:", e); }
   }, [setMods, markDirty]);
-
-  const handleReset = useCallback(async () => {
-    try {
-      const result = await window.api.resetLoadOrder();
-      if (Array.isArray(result)) setMods(result);
-    } catch (e) { console.error("Failed to reset load order:", e); }
-  }, [setMods]);
 
   const handleImportLocal = useCallback(async () => {
     setIsScanning(true);
@@ -582,8 +578,6 @@ export default function ModList() {
             <ToggleRight className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOn")}</button>
           <button onClick={handleDisableAll} className="btn-morandi-ghost text-xs">
             <ToggleLeft className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOff")}</button>
-          <button onClick={handleReset} className="btn-morandi-ghost text-xs">
-            <RotateCcw className="w-3.5 h-3.5 inline mr-1" />{t("modlist.reset")}</button>
         </div>
         <div className="text-xs text-morandi-text-muted ml-auto shrink-0">
           {isScanning ? (

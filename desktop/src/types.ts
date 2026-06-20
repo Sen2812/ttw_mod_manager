@@ -111,7 +111,6 @@ declare global {
       disableAll: () => Promise<Mod[] | ApiResponse>;
       reorderMod: (n: string, i: number) => Promise<Mod[] | ApiResponse>;
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
-      resetLoadOrder: () => Promise<Mod[] | ApiResponse>;
       getConfig: () => Promise<AppConfigResponse>;
       getSteamStatus: () => Promise<{
         installed: boolean;
@@ -151,7 +150,13 @@ declare global {
       addCustomCategory: (name: string) => Promise<string[]>;
       checkModUpdates: (force?: boolean) => Promise<{ mods: Mod[]; outdatedCount: number }>;
       forceUpdateMod: (modName: string) => Promise<{ ok: boolean; error?: string; mods: Mod[]; outdatedCount: number }>;
-      triggerWorkshopDownload: (workshopId: string) => Promise<{ ok: boolean; error?: string; mods: Mod[] }>;
+      triggerWorkshopDownload: (workshopId: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        inProgress?: boolean;
+        mods: Mod[];
+        subscribedWorkshopIds?: string[];
+      }>;
       forceUpdateAllOutdated: () => Promise<{ updated: number; failed: string[]; mods: Mod[]; outdatedCount: number }>;
       // External links / folders
       openUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
