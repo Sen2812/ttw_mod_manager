@@ -19,13 +19,29 @@ export function sortByName(mods: Mod[]): Mod[] {
 }
 
 /**
+ * Enabled mods in UI display order (top → bottom, low → high priority).
+ */
+export function getEnabledModsInLoadOrder(mods: Mod[]): Mod[] {
+  return sortByLoadOrder(mods.filter((m) => m.isEnabled));
+}
+
+/**
+ * Map a UI list index to CA launcher moddata `order`.
+ * In moddata, lower order = higher priority (top of the official launcher list).
+ * Our UI puts higher-priority mods at the bottom, so the mapping is inverted.
+ */
+export function toCaLauncherOrder(uiIndex: number, modCount: number): number {
+  return modCount - uiIndex;
+}
+
+/**
  * Sort mods respecting explicit load order (ascending):
  * - Mods with loadOrder=0 are placed at the top, loadOrder=1 next, etc.
  * - Mods without loadOrder are sorted alphabetically to fill the gaps.
  *
- * Display semantics (matches WH3-Mod-Manager & the game's used_mods.txt):
- *   top of list  = loaded first  = lowest priority (gets overwritten)
- *   bottom of list = loaded last = highest priority (overwrites above)
+ * Display semantics:
+ *   top of list  = lowest priority (gets overwritten in-game)
+ *   bottom of list = highest priority (overwrites above)
  */
 export function sortByLoadOrder(mods: Mod[]): Mod[] {
   const sorted = sortByName(mods);

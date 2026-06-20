@@ -636,7 +636,10 @@ function registerIpc() {
     }));
 
     const analysis = detectOverwrites(
-      enabledMods.map(m => ({ name: m.name, loadOrder: m.loadOrder ?? 0 })),
+      enabledMods.map((m, i) => ({
+        name: m.name,
+        loadOrder: m.loadOrder ?? i,
+      })),
       indices,
       { modPathByName },
     );
@@ -816,10 +819,8 @@ function registerIpc() {
     const enabledMods = mm.getEnabledMods();
 
     // ── 1. 生成 used_mods.txt 内容 ──
-    // 参考 WH3-Mod-Manager 的实现：
-    //   - 按加载顺序（loadOrder 升序）排列，后加载的 mod 优先级更高
-    //   - Workshop 目录的 mod 需要 add_working_directory
-    //   - data/modding/ 的 mod 需要先复制到 data/
+    // UI 列表越靠下优先级越高；写入 used_mods.txt / moddata 时会映射为
+    // CA 启动器语义（越靠前 = 优先级越高）。
     const isLinux = process.platform === "linux";
     const { text: usedModsText, modsToCopyToData } = generateUsedModsContent(
       enabledMods,

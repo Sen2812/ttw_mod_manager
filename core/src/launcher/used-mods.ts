@@ -6,8 +6,10 @@
  *
  *   Warhammer3.exe used_mods.txt;
  *
- * The file tells the game which mods to load and in what order. Mods listed
- * later override (take priority over) mods listed earlier.
+ * The file tells the game which mods to load and in what order. The CA launcher
+ * lists highest-priority mods first; our UI lists them last (bottom = wins).
+ * We therefore emit mods in reverse UI order so in-game priority matches the
+ * mod manager list and overwrite analysis.
  *
  * Format:
  *   add_working_directory "D:/path/to/mod/folder";
@@ -21,6 +23,7 @@
 
 import * as path from "path";
 import { Mod } from "../types";
+import { sortByLoadOrder } from "../mod-manager/mod-sorting";
 
 export interface UsedModsContent {
   /** The text to write into used_mods.txt. */
@@ -30,24 +33,9 @@ export interface UsedModsContent {
 }
 
 /**
- * Sort enabled mods into the order they should be loaded.
- *
- * Load order semantics: lower loadOrder = loaded earlier = lower priority.
- * Mods without an explicit loadOrder fall back to alphabetical order.
- */
-function sortByLoadOrderAscending(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => {
-    const loa = a.loadOrder ?? Number.MAX_SAFE_INTEGER;
-    const lob = b.loadOrder ?? Number.MAX_SAFE_INTEGER;
-    if (loa !== lob) return loa - lob;
-    return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
-  });
-}
-
-/**
  * Generate the content for used_mods.txt.
  *
- * @param enabledMods  All enabled mods (will be filtered & sorted internally).
+ * @param enabledMods  All enabled mods (will be sorted internally).
  * @param dataFolder   Absolute path to the game's data/ folder. Mods that
  *                     already live here don't need `add_working_directory`.
  * @param isLinux      On Linux (Proton), paths need a `Z:` prefix.
@@ -57,7 +45,9 @@ export function generateUsedModsContent(
   dataFolder: string,
   isLinux: boolean = false,
 ): UsedModsContent {
-  const sorted = sortByLoadOrderAscending(enabledMods);
+  // UI: top = low priority, bottom = high priority.
+  // Game / CA launcher: earlier in file = higher priority.
+  const sorted = [...sortByLoadOrder(enabledMods)].reverse();
 
   // Mods in data/modding/ need to be copied to data/ before launch.
   const modsToCopyToData = sorted.filter((mod) => mod.isInModding);
@@ -85,7 +75,7 @@ export function generateUsedModsContent(
     lines.push(`add_working_directory "${prefix}${dir}";`);
   }
 
-  // 2. All mod entries in load order
+  // 2. All mod entries in game priority order (highest priority first)
   for (const mod of sorted) {
     lines.push(`mod "${mod.name}";`);
   }

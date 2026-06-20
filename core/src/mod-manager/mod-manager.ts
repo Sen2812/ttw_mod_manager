@@ -20,6 +20,7 @@ import {
 } from "./workshop-update-status";
 import {
   sortByLoadOrder,
+  getEnabledModsInLoadOrder,
   filterMods,
   deduplicateDataContent,
   adjustDuplicateLoadOrders,
@@ -475,9 +476,9 @@ export class ModManager {
     return this.mods;
   }
 
-  /** Get enabled mods */
+  /** Get enabled mods in UI load-order (top → bottom). */
   getEnabledMods(): Mod[] {
-    return this.mods.filter((m) => m.isEnabled);
+    return getEnabledModsInLoadOrder(this.mods);
   }
 
   /** Get mods sorted and filtered */

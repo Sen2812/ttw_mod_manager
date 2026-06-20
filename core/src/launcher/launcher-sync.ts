@@ -16,6 +16,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Mod } from "../types";
+import { sortByLoadOrder, toCaLauncherOrder } from "../mod-manager/mod-sorting";
 
 export interface LauncherModEntry {
   uuid: string;
@@ -157,11 +158,13 @@ export function syncModsToLauncher(
     dataPath: "",
   };
 
-  // Walk our mods in array (load-order) order and assign sequential orders.
-  mods.forEach((mod, index) => {
+  // Walk mods in UI order (top = low priority) and map to CA launcher order
+  // (order 1 = highest priority, top of the official launcher list).
+  const sortedMods = sortByLoadOrder(mods);
+  sortedMods.forEach((mod, index) => {
     const key = mod.name.toLowerCase();
     const existing = entryByKey.get(key);
-    const newOrder = index + 1;
+    const newOrder = toCaLauncherOrder(index, sortedMods.length);
 
     if (existing) {
       const changed =
