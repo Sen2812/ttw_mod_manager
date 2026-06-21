@@ -1049,7 +1049,7 @@ function registerIpc() {
     appLog = createAppLogger(path.join(dataDir, APP_LOG_FILE));
     await mm.setConfigDir(newDir);
     void runDeferredWorkshopEnrichment();
-    return { ok: true, dataDir, ...buildBootstrapPayload() };
+    return { ok: true, ...buildBootstrapPayload() };
   });
 
   // ── 启动游戏 ─────────────────────────────────────────────────────────────
