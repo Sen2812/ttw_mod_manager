@@ -24,14 +24,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function folderMissingOrEmpty(folder) {
-  if (!folder) return true;
+function folderHasValidPack(folder) {
+  if (!folder || !fs.existsSync(folder)) return false;
   try {
-    if (!fs.existsSync(folder)) return true;
-    return !fs.readdirSync(folder).some((name) => name.endsWith(".pack"));
+    return fs.readdirSync(folder).some((name) => {
+      if (!name.endsWith(".pack")) return false;
+      try {
+        return fs.statSync(path.join(folder, name)).size >= 32;
+      } catch {
+        return false;
+      }
+    });
   } catch {
-    return true;
+    return false;
   }
+}
+
+function folderMissingOrEmpty(folder) {
+  return !folderHasValidPack(folder);
 }
 
 function getDependencies(client, ids, cb) {
@@ -74,67 +84,95 @@ function readItemStatus(client, id) {
   };
 }
 
-/** True while bytes are moving, or Steam is validating/extracting into an empty folder. */
-function isDownloadInProgress(status) {
-  const { state, downloadCurrent, downloadTotal, folderMissing } = status;
+/** True only when Steam is actively downloading bytes or has queued the item. */
+function isActivelyDownloading(status) {
+  const { state, downloadCurrent, downloadTotal } = status;
   if (state & ITEM_DOWNLOADING || state & ITEM_DOWNLOAD_PENDING) return true;
   if (downloadTotal > 0 && downloadCurrent < downloadTotal) return true;
-  if (downloadTotal > 0 && folderMissing) return true;
-  if ((state & ITEM_INSTALLED) && folderMissing) return true;
   return false;
+}
+
+async function resubscribeAndDownload(client, id, before, mode) {
+  try {
+    if (before.state & ITEM_SUBSCRIBED) {
+      await client.workshop.unsubscribe(id);
+      await sleep(800);
+    }
+    await client.workshop.subscribe(id);
+    await sleep(2000);
+    let triggered = client.workshop.download(id, true);
+    if (!triggered) triggered = client.workshop.download(id, false);
+    await sleep(1500);
+    const after = readItemStatus(client, id);
+    const started = triggered
+      || isActivelyDownloading(after)
+      || after.downloadTotal > 0;
+    return { triggered: started, mode, ...after };
+  } catch (e) {
+    return { triggered: false, mode: `${mode}_failed`, error: String(e), ...before };
+  }
 }
 
 /**
  * Trigger workshop download via ISteamUGC#DownloadItem.
- * If Steam still thinks the item is installed after a manual folder delete,
- * unsubscribe + resubscribe once to force a fresh download queue entry.
+ * When Steam still marks an item installed but local files are gone (common after
+ * a bad force-update delete), unsubscribe + resubscribe to queue a real download.
  */
 async function triggerWorkshopDownload(client, id) {
   const before = readItemStatus(client, id);
+  const installedButMissing = (before.state & ITEM_INSTALLED) && before.folderMissing;
+  const notSubscribed = !(before.state & ITEM_SUBSCRIBED);
 
-  if (isDownloadInProgress(before)) {
+  if (isActivelyDownloading(before) && !installedButMissing) {
     return { triggered: true, mode: "in_progress", ...before };
   }
 
-  let triggered = client.workshop.download(id, false);
-  if (triggered) {
-    await sleep(1500);
-    return { triggered: true, mode: "download", ...readItemStatus(client, id) };
-  }
-
-  const installedButMissing =
-    (before.state & ITEM_INSTALLED) && before.folderMissing;
-  const notSubscribed = !(before.state & ITEM_SUBSCRIBED);
-
-  // Only resubscribe on a cold start (no bytes queued yet). Never during validation.
-  if ((installedButMissing || notSubscribed) && before.downloadTotal === 0 && !isDownloadInProgress(before)) {
-    try {
-      if (before.state & ITEM_SUBSCRIBED) {
-        await client.workshop.unsubscribe(id);
-        await sleep(800);
-      }
-      await client.workshop.subscribe(id);
-      await sleep(2000);
-      triggered = client.workshop.download(id, false);
-      const after = readItemStatus(client, id);
-      return {
-        triggered: triggered || !!(after.state & (ITEM_DOWNLOADING | ITEM_DOWNLOAD_PENDING)),
-        mode: "resubscribed",
-        ...after,
-      };
-    } catch (e) {
-      return { triggered: false, mode: "resubscribe_failed", error: String(e), ...before };
-    }
+  if (installedButMissing || notSubscribed) {
+    return resubscribeAndDownload(
+      client,
+      id,
+      before,
+      installedButMissing ? "installed_missing_resubscribe" : "resubscribed",
+    );
   }
 
   if (before.state & ITEM_NEEDS_UPDATE) {
-    await sleep(1000);
+    let triggered = client.workshop.download(id, true);
+    if (triggered) {
+      await sleep(1500);
+      const after = readItemStatus(client, id);
+      if (isActivelyDownloading(after) || after.downloadTotal > 0) {
+        return { triggered: true, mode: "needs_update_high", ...after };
+      }
+    }
+    await sleep(800);
     triggered = client.workshop.download(id, false);
-    const after = readItemStatus(client, id);
-    return { triggered, mode: "retry_needs_update", ...after };
+    if (triggered) {
+      await sleep(1500);
+      const after = readItemStatus(client, id);
+      return { triggered: true, mode: "needs_update", ...after };
+    }
   }
 
-  return { triggered: false, mode: "download_rejected", ...before };
+  let triggered = client.workshop.download(id, true);
+  if (triggered) {
+    await sleep(1500);
+    const after = readItemStatus(client, id);
+    if (isActivelyDownloading(after) || after.downloadTotal > 0) {
+      return { triggered: true, mode: "download", ...after };
+    }
+  }
+
+  triggered = client.workshop.download(id, false);
+  if (triggered) {
+    await sleep(1500);
+    const after = readItemStatus(client, id);
+    if (isActivelyDownloading(after) || after.downloadTotal > 0) {
+      return { triggered: true, mode: "download_low", ...after };
+    }
+  }
+
+  return { triggered: false, mode: "download_rejected", ...readItemStatus(client, id) };
 }
 
 const command = process.argv[3];

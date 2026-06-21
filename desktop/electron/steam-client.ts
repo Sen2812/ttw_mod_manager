@@ -5,7 +5,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 
 const STEAM_SUB_TIMEOUT_MS = 120_000;
-const STEAM_DOWNLOAD_TIMEOUT_MS = 30_000;
+const STEAM_DOWNLOAD_TIMEOUT_MS = 60_000;
 const STEAM_PING_TIMEOUT_MS = 8_000;
 
 /** Thrown when Steam process exists but steamworks IPC is unavailable (e.g. offline mode). */
@@ -158,18 +158,19 @@ export interface WorkshopItemDownloadStatus {
   folderMissing?: boolean;
 }
 
-/** True while Steam is downloading or validating workshop content. */
+/** True while Steam is actively downloading or has queued download bytes. */
 export function isWorkshopDownloadInProgress(status: WorkshopItemDownloadStatus): boolean {
   const ITEM_DOWNLOADING = 16;
   const ITEM_DOWNLOAD_PENDING = 32;
-  const ITEM_INSTALLED = 4;
-  const { state, downloadCurrent, downloadTotal, folderMissing } = status;
+  const { state, downloadCurrent, downloadTotal } = status;
   if (state & ITEM_DOWNLOADING || state & ITEM_DOWNLOAD_PENDING) return true;
   if (downloadTotal > 0 && downloadCurrent < downloadTotal) return true;
-  if (downloadTotal > 0 && folderMissing) return true;
-  // Subscribed, marked installed, but files gone — likely validating or stale install record
-  if ((state & ITEM_INSTALLED) && folderMissing) return true;
   return false;
+}
+
+/** Steam reported success but no download was actually queued (stale install record). */
+export function isWorkshopDownloadStalled(status: WorkshopItemDownloadStatus): boolean {
+  return !isWorkshopDownloadInProgress(status) && !!status.folderMissing;
 }
 
 export interface WorkshopDownloadTriggerResult extends WorkshopItemDownloadStatus {

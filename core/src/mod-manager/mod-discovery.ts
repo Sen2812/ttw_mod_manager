@@ -518,32 +518,24 @@ export function buildPendingWorkshopMod(
   };
 }
 
-function workshopFolderHasPack(contentFolder: string, workshopId: string): boolean {
+function workshopFolderHasValidPack(contentFolder: string, workshopId: string): boolean {
   const folder = path.join(contentFolder, workshopId);
   if (!fs.existsSync(folder)) return false;
   try {
-    return fs.readdirSync(folder).some(name => name.endsWith(".pack"));
+    return fs.readdirSync(folder).some((name) => {
+      if (!name.endsWith(".pack")) return false;
+      try {
+        return fs.statSync(path.join(folder, name)).size >= 32;
+      } catch {
+        return false;
+      }
+    });
   } catch {
     return false;
   }
 }
 
-async function filterWorkshopIdsForGame(
-  ids: string[],
-  gameSteamId: string,
-  log?: LogCallback,
-): Promise<string[]> {
-  const unique = [...new Set(ids)];
-  if (unique.length === 0) return [];
-  const meta = await fetchWorkshopMetadata(unique, log);
-  const target = Number(gameSteamId);
-  return unique.filter(id => {
-    const entry = meta.get(id);
-    if (!entry || (entry.apiResult !== undefined && entry.apiResult !== 1)) return false;
-    if (entry.consumerAppId !== undefined) return entry.consumerAppId === target;
-    return true;
-  });
-}
+export { workshopFolderHasValidPack };
 
 async function mergeMissingSubscribedWorkshopMods(
   mods: Mod[],
@@ -553,6 +545,7 @@ async function mergeMissingSubscribedWorkshopMods(
   cacheDir: string | undefined,
   preserveWorkshopMods: Mod[] | undefined,
   skipSteamSubscriptionFetch: boolean,
+  cachedSubscribedWorkshopIds: string[] | undefined,
   log?: LogCallback,
 ): Promise<string[]> {
   const presentWorkshopIds = new Set(
@@ -580,22 +573,39 @@ async function mergeMissingSubscribedWorkshopMods(
   }
 
   const subscribedIds = skipSteamSubscriptionFetch
-    ? []
+    ? (cachedSubscribedWorkshopIds ?? [])
     : await fetchSubscribedWorkshopIds(game, log);
 
+  const subscribedSet = new Set(subscribedIds.filter(isNumericWorkshopId));
   const missingIds = new Set<string>();
+
   for (const prev of preserveWorkshopMods ?? []) {
     const id = resolveModWorkshopId(prev);
     if (id && !presentWorkshopIds.has(id)) missingIds.add(id);
   }
 
-  if (!skipSteamSubscriptionFetch && contentFolder) {
+  if (contentFolder) {
+    // Steam subscription list is authoritative for the active game — do not drop
+    // items when workshop API metadata is stale (common after a failed force-update).
     const subscribedMissing = subscribedIds.filter(
-      id => !presentWorkshopIds.has(id) && !workshopFolderHasPack(contentFolder, id),
+      id => isNumericWorkshopId(id)
+        && !presentWorkshopIds.has(id)
+        && !workshopFolderHasValidPack(contentFolder, id),
     );
-    if (subscribedMissing.length > 0) {
-      const forGame = await filterWorkshopIdsForGame(subscribedMissing, game.steamId, log);
-      for (const id of forGame) missingIds.add(id);
+    for (const id of subscribedMissing) missingIds.add(id);
+
+    // Workshop folders on disk without a loadable .pack (empty folder, stub file, etc.)
+    for (const folderId of contentFolderIds) {
+      if (!isNumericWorkshopId(folderId)) continue;
+      if (presentWorkshopIds.has(folderId)) continue;
+      if (workshopFolderHasValidPack(contentFolder, folderId)) continue;
+      if (
+        subscribedSet.has(folderId)
+        || hintByWorkshopId.has(folderId)
+        || cache?.has(folderId)
+      ) {
+        missingIds.add(folderId);
+      }
     }
   }
 
@@ -971,6 +981,8 @@ export interface ScanModsOptions {
   preserveWorkshopMods?: Mod[];
   /** Skip live Steam subscription query (avoids steamworks churn during download polling). */
   skipSteamSubscriptionFetch?: boolean;
+  /** When skipSteamSubscriptionFetch is set, use this list to restore missing placeholders. */
+  cachedSubscribedWorkshopIds?: string[];
 }
 
 function applyWorkshopMetadataFromCache(mods: Mod[], cache: WorkshopCache): void {
@@ -1218,6 +1230,7 @@ export async function scanMods(
     cacheDir,
     options.preserveWorkshopMods,
     options.skipSteamSubscriptionFetch === true,
+    options.cachedSubscribedWorkshopIds,
     log,
   );
 

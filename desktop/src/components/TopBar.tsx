@@ -15,6 +15,13 @@ export default function TopBar() {
   const currentGameName = games.find(g => g.id === currentGame)?.name ?? t("topbar.loading");
   const [pendingGame, setPendingGame] = useState<{ id: string; name: string } | null>(null);
   const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
+  const resolveLaunchErrorMessage = (result: { error?: string; errorCode?: string }) => {
+    if (result.errorCode === "GAME_ALREADY_RUNNING") return t("topbar.gameAlreadyRunning");
+    if (result.errorCode === "LAUNCH_IN_PROGRESS") return t("topbar.launchInProgress");
+    return result.error ?? t("topbar.launchErrorTitle");
+  };
 
   const doGameChange = async (gameId: string) => {
     setShowGameMenu(false);
@@ -57,16 +64,23 @@ export default function TopBar() {
   };
 
   const doLaunch = async () => {
+    if (isLaunching) return;
     setIsLaunching(true);
+    setLaunchError(null);
     try {
       const result = await window.api.launchGame(mods);
-      if (result?.error) console.error("Failed to launch game:", result.error);
+      if (result?.error) {
+        setLaunchError(resolveLaunchErrorMessage(result));
+        console.error("Failed to launch game:", result.error);
+      }
     } catch (e) {
       console.error("Failed to launch game:", e);
+      setLaunchError(t("topbar.launchErrorTitle"));
     } finally { setIsLaunching(false); }
   };
 
   const handleLaunch = () => {
+    if (isLaunching) return;
     if (isDirty) {
       setShowLaunchConfirm(true);
       return;
@@ -139,6 +153,16 @@ export default function TopBar() {
         doLaunch();
       }}
       onCancel={() => setShowLaunchConfirm(false)}
+    />
+
+    <ConfirmDialog
+      open={launchError !== null}
+      title={t("topbar.launchErrorTitle")}
+      message={launchError ?? ""}
+      confirmText={t("common.done")}
+      variant="warning"
+      onConfirm={() => setLaunchError(null)}
+      onCancel={() => setLaunchError(null)}
     />
 
     {/* 未保存修改 → 切换游戏确认弹窗 */}
