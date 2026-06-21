@@ -12,9 +12,6 @@ import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
 import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, type ScanModsOptions } from "./mod-discovery";
 import {
-  forceWorkshopModUpdate,
-} from "./workshop-update";
-import {
   countOutdatedMods,
   isModOutdated,
 } from "./workshop-update-status";
@@ -45,6 +42,15 @@ import { isUsableWorkshopTitle } from "./mod-display";
 import { importLocalPackFiles, type ImportLocalPacksResult } from "./local-pack-import";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
+
+function modHasLocalPack(mod: Mod): boolean {
+  if (!mod.path) return false;
+  try {
+    return fs.existsSync(mod.path);
+  } catch {
+    return false;
+  }
+}
 
 export interface ModManagerOptions {
   /** Path to config file directory (defaults to cwd) */
@@ -193,7 +199,12 @@ export class ModManager {
       this.folderPaths,
       this.configDir,
       this.log,
-      { ...options, preserveWorkshopMods },
+      {
+        ...options,
+        cachedSubscribedWorkshopIds: options.skipSteamSubscriptionFetch
+          ? (options.cachedSubscribedWorkshopIds ?? this.subscribedWorkshopIds)
+          : options.cachedSubscribedWorkshopIds,
+      },
     );
     this.mods = result.mods;
     this.vanillaPacks = result.vanillaPacks;
@@ -503,7 +514,7 @@ export class ModManager {
   toggleMod(modName: string): boolean {
     const mod = this.mods.find((m) => m.name === modName);
     if (!mod) return false;
-    if (mod.pendingDownload && !mod.isEnabled) return false;
+    if (mod.pendingDownload && !mod.isEnabled && !modHasLocalPack(mod)) return false;
     mod.isEnabled = !mod.isEnabled;
     return mod.isEnabled;
   }
@@ -512,7 +523,7 @@ export class ModManager {
   enableMod(modName: string): void {
     const mod = this.mods.find((m) => m.name === modName);
     if (!mod) return;
-    if (mod.pendingDownload) return;
+    if (mod.pendingDownload && !modHasLocalPack(mod)) return;
     // Check dependencies
     const missingDeps = this.checkDependencies(mod);
     if (missingDeps.length > 0) {
@@ -639,8 +650,8 @@ export class ModManager {
     return { mods: this.mods, outdatedCount: countOutdatedMods(this.mods) };
   }
 
-  /** Delete local workshop files to force Steam re-download. */
-  async forceUpdateMod(modName: string): Promise<{ ok: boolean; error?: string }> {
+  /** Queue a Steam workshop re-download without removing local files. */
+  async forceUpdateMod(modName: string): Promise<{ ok: boolean; error?: string; workshopId?: string }> {
     const mod = this.mods.find((m) => m.name === modName);
     if (!mod || mod.isInData || !mod.workshopId) {
       return { ok: false, error: "NOT_WORKSHOP_MOD" };
@@ -648,26 +659,10 @@ export class ModManager {
     if (!this.folderPaths.contentFolder) {
       return { ok: false, error: "NO_CONTENT_FOLDER" };
     }
-
-    const result = await forceWorkshopModUpdate({
-      contentFolder: this.folderPaths.contentFolder,
-      workshopId: mod.workshopId,
-    });
-
-    if (result.ok) {
-      const snapshot: Mod = {
-        ...mod,
-        tags: [...mod.tags],
-        reqModIds: mod.reqModIds ? [...mod.reqModIds] : undefined,
-        reqModIdToName: mod.reqModIdToName?.map(([id, name]) => [id, name] as [string, string]),
-        categories: mod.categories ? [...mod.categories] : undefined,
-      };
-      await this.scanMods({ deferNetwork: false, preserveWorkshopMods: [snapshot] });
-    }
-    return result;
+    return { ok: true, workshopId: mod.workshopId };
   }
 
-  /** Force-update every mod that is behind the workshop version. */
+  /** Validate every outdated workshop mod for force-update (Steam trigger is handled by the host app). */
   async forceUpdateAllOutdated(): Promise<{ updated: number; failed: string[]; mods: Mod[] }> {
     const outdated = this.mods.filter((m) => isModOutdated(m));
     const failed: string[] = [];

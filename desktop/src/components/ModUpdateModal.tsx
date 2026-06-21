@@ -44,7 +44,8 @@ export default function ModUpdateModal() {
         setMods(result.mods);
         close();
       } else {
-        setError(t(`update.error.${result.error ?? "unknown"}`));
+        const code = (result as { errorCode?: string }).errorCode ?? result.error;
+        setError(t(`update.error.${code ?? "unknown"}`));
       }
     } catch (e) {
       console.error("Force update failed:", e);

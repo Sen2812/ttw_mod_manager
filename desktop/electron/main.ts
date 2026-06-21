@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from "electron";
-import { exec } from "child_process";
+import { exec, execSync } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 
@@ -11,10 +11,19 @@ import { syncModsToLauncher } from "../../core/src/launcher/launcher-sync";
 import { generateUsedModsContent } from "../../core/src/launcher/used-mods";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
-import { countOutdatedMods } from "../../core/src/mod-manager/workshop-update-status";
+import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
+import { workshopFolderHasValidPack } from "../../core/src/mod-manager/mod-discovery";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
 import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
-import { fetchWorkshopDependenciesViaSteam, fetchSubscribedWorkshopIdsViaSteam, triggerWorkshopDownloadsViaSteam, getWorkshopItemStatusesViaSteam, probeSteamIpc } from "./steam-client";
+import {
+  fetchWorkshopDependenciesViaSteam,
+  fetchSubscribedWorkshopIdsViaSteam,
+  triggerWorkshopDownloadsViaSteam,
+  getWorkshopItemStatusesViaSteam,
+  probeSteamIpc,
+  isWorkshopDownloadInProgress,
+  type WorkshopDownloadTriggerResult,
+} from "./steam-client";
 import { getSteamClientStatus } from "./steam-status";
 
 let mainWindow: BrowserWindow | null = null;
@@ -27,6 +36,9 @@ let hasUnsavedChanges = false; // 追踪未保存的更改
 // 关闭确认：主进程等待渲染进程返回决定（save / discard / cancel）
 let pendingCloseDecision: ((choice: "save" | "discard" | "cancel") => void) | null = null;
 let isConfirmingClose = false; // 防止重复弹窗
+let gameLaunchInProgress = false;
+
+const GAME_LAUNCH_COOLDOWN_MS = 3000;
 
 for (const game of BUILTIN_GAMES) gameRegistry.register(game);
 
@@ -86,7 +98,28 @@ function buildBootstrapPayload() {
     categories: mm.getCategories(),
     dataDir,
     mods: mm.getMods(),
+    preferences: {
+      isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+    },
   };
+}
+
+/** Check whether the game executable is already running. */
+function isGameProcessRunning(processName: string): boolean {
+  try {
+    if (process.platform === "win32") {
+      const output = execSync(`tasklist /FI "IMAGENAME eq ${processName}" /FO CSV /NH`, {
+        encoding: "utf8",
+        timeout: 5000,
+      });
+      return output.toLowerCase().includes(processName.toLowerCase());
+    }
+    const baseName = processName.replace(/\.exe$/i, "");
+    execSync(`pgrep -x "${baseName}"`, { stdio: "ignore", timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function notifyModsUpdated(): void {
@@ -157,28 +190,33 @@ function getCurrentSteamAppId(): number | undefined {
 let pendingDownloadPollTimer: ReturnType<typeof setInterval> | null = null;
 /** Workshop IDs with an active download request — never re-trigger until pack appears or force-update. */
 const pendingDownloadLocked = new Set<string>();
+const pendingDownloadLockedAt = new Map<string, number>();
 let syncPendingInFlight: Promise<void> | null = null;
 let deferredWorkshopRunning = false;
 let lastDownloadProgressRefresh = 0;
 const PENDING_POLL_MS = 15_000;
 const DOWNLOAD_PROGRESS_REFRESH_MS = 60_000;
+const STUCK_DOWNLOAD_RETRY_MS = 45_000;
 
 function lockPendingDownload(workshopId: string): void {
   pendingDownloadLocked.add(workshopId);
+  pendingDownloadLockedAt.set(workshopId, Date.now());
 }
 
 function unlockPendingDownload(workshopId: string): void {
   pendingDownloadLocked.delete(workshopId);
+  pendingDownloadLockedAt.delete(workshopId);
+}
+
+function workshopDownloadQueued(result: WorkshopDownloadTriggerResult): boolean {
+  if (!result.triggered) return false;
+  if (isWorkshopDownloadInProgress(result)) return true;
+  if ((result.downloadTotal ?? 0) > 0) return true;
+  return result.mode !== "in_progress" && result.mode !== "download_rejected";
 }
 
 function workshopFolderHasPack(contentFolder: string, workshopId: string): boolean {
-  const folder = path.join(contentFolder, workshopId);
-  if (!fs.existsSync(folder)) return false;
-  try {
-    return fs.readdirSync(folder).some(name => name.endsWith(".pack"));
-  } catch {
-    return false;
-  }
+  return workshopFolderHasValidPack(contentFolder, workshopId);
 }
 
 const scanWhileDownloadingOpts = {
@@ -257,13 +295,15 @@ async function syncPendingWorkshopDownloadsInner(forceIds?: string[]): Promise<v
       const results = await triggerWorkshopDownloadsViaSteam(appId, toTrigger);
       let ok = 0;
       for (const [id, result] of results) {
-        if (result.triggered) ok++;
-        else if (result.mode !== "in_progress") {
-          appLog(
-            `Workshop ${id}: download not started (mode=${result.mode ?? "unknown"}, `
-            + `state=${result.state}, folderMissing=${result.folderMissing ?? "?"})`,
-          );
+        if (workshopDownloadQueued(result)) {
+          ok++;
+          continue;
         }
+        unlockPendingDownload(id);
+        appLog(
+          `Workshop ${id}: download not started (mode=${result.mode ?? "unknown"}, `
+          + `state=${result.state}, folderMissing=${result.folderMissing ?? "?"})`,
+        );
       }
       appLog(`Steam download requested for ${ok}/${toTrigger.length} pending workshop item(s)`);
     } catch (e) {
@@ -305,6 +345,23 @@ async function pollPendingDownloads(): Promise<void> {
       }
     }
 
+    const now = Date.now();
+    const stuckIds = pending
+      .filter((mod) => {
+        if (!pendingDownloadLocked.has(mod.workshopId)) return false;
+        if (workshopFolderHasPack(contentFolder, mod.workshopId)) return false;
+        const lockedAt = pendingDownloadLockedAt.get(mod.workshopId) ?? 0;
+        if (now - lockedAt < STUCK_DOWNLOAD_RETRY_MS) return false;
+        const noBytes = !mod.downloadBytesTotal || mod.downloadBytesTotal === 0;
+        return noBytes;
+      })
+      .map(mod => mod.workshopId);
+    if (stuckIds.length > 0) {
+      appLog(`Retrying stuck workshop download(s): ${stuckIds.join(", ")}`);
+      for (const id of stuckIds) unlockPendingDownload(id);
+      await syncPendingWorkshopDownloads(stuckIds);
+    }
+
     if (packReady) {
       await mm.scanMods(scanWhileDownloadingOpts);
       notifyModsUpdated();
@@ -314,14 +371,111 @@ async function pollPendingDownloads(): Promise<void> {
       return;
     }
 
-    const now = Date.now();
     if (now - lastDownloadProgressRefresh >= DOWNLOAD_PROGRESS_REFRESH_MS) {
       lastDownloadProgressRefresh = now;
       mm.mods = await applyPendingDownloadStatus(mm.getMods());
       notifyModsUpdated();
     }
+
+    const appId = getCurrentSteamAppId();
+    const outdated = mm.getMods().filter(m => m.workshopId && isModOutdated(m) && modHasLocalPack(m));
+    if (appId && outdated.length > 0) {
+      try {
+        const statuses = await getWorkshopItemStatusesViaSteam(
+          appId,
+          outdated.map(m => m.workshopId),
+        );
+        const finished = outdated.some(m => {
+          const st = statuses.get(m.workshopId);
+          return st && st.downloadTotal > 0 && st.downloadCurrent >= st.downloadTotal;
+        });
+        if (finished) {
+          await mm.scanMods(scanWhileDownloadingOpts);
+          await mm.checkModUpdates(true);
+          notifyModsUpdated();
+        }
+      } catch {
+        /* ignore progress probe errors */
+      }
+    }
   } catch (e) {
     appLog(`Pending download poll failed: ${e}`);
+  }
+}
+
+function modHasLocalPack(mod: Mod): boolean {
+  if (!mod.path) return false;
+  try {
+    return fs.existsSync(mod.path);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ask Steam to update a workshop item without deleting local files.
+ * Keeps the existing .pack usable when the download fails or has not finished.
+ */
+async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
+  ok: boolean;
+  error?: string;
+  errorCode?: string;
+  downloadTriggered?: boolean;
+}> {
+  if (!mod.workshopId) {
+    return { ok: false, error: "NOT_WORKSHOP_MOD", errorCode: "NOT_WORKSHOP_MOD" };
+  }
+
+  const hadLocalPack = modHasLocalPack(mod);
+  const appId = getCurrentSteamAppId();
+  if (!appId) {
+    return hadLocalPack
+      ? { ok: true, downloadTriggered: false }
+      : { ok: false, error: "Steam unavailable", errorCode: "STEAM_UNAVAILABLE" };
+  }
+
+  unlockPendingDownload(mod.workshopId);
+  lockPendingDownload(mod.workshopId);
+
+  try {
+    const results = await triggerWorkshopDownloadsViaSteam(appId, [mod.workshopId]);
+    const trigger = results.get(mod.workshopId);
+    const downloadTriggered = trigger ? workshopDownloadQueued(trigger) : false;
+
+    if (!downloadTriggered && !hadLocalPack) {
+      unlockPendingDownload(mod.workshopId);
+      await mm.scanMods(scanWhileDownloadingOpts);
+      mm.mods = await applyPendingDownloadStatus(mm.getMods());
+      return { ok: false, error: "STEAM_DOWNLOAD_FAILED", errorCode: "STEAM_DOWNLOAD_FAILED" };
+    }
+
+    if (!hadLocalPack) {
+      await mm.scanMods(scanWhileDownloadingOpts);
+      mm.mods = await applyPendingDownloadStatus(mm.getMods());
+      startPendingDownloadPoll();
+    } else {
+      startPendingDownloadPoll();
+      void mm.checkModUpdates(true).then(() => notifyModsUpdated());
+    }
+
+    if (downloadTriggered) {
+      appLog(`Force update: Steam download queued for workshop item ${mod.workshopId}`);
+    } else if (hadLocalPack) {
+      appLog(`Force update: Steam did not queue download for ${mod.workshopId}; local pack kept`);
+    }
+
+    return { ok: true, downloadTriggered };
+  } catch (e) {
+    unlockPendingDownload(mod.workshopId);
+    appLog(`Force update failed for ${mod.workshopId}: ${e}`);
+    if (hadLocalPack) {
+      return { ok: true, downloadTriggered: false };
+    }
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      errorCode: "STEAM_DOWNLOAD_FAILED",
+    };
   }
 }
 
@@ -331,6 +485,14 @@ async function runDeferredWorkshopEnrichment(): Promise<void> {
   deferredWorkshopRunning = true;
   const gen = ++deferredWorkshopGeneration;
   try {
+    await syncPendingWorkshopDownloads();
+    if (gen !== deferredWorkshopGeneration) return;
+
+    // Steam IPC may not be ready during mm.init(); rescan subscriptions now.
+    await mm.scanMods({ deferNetwork: true });
+    if (gen !== deferredWorkshopGeneration) return;
+    notifyModsUpdated();
+
     await syncPendingWorkshopDownloads();
     if (gen !== deferredWorkshopGeneration) return;
 
@@ -465,6 +627,31 @@ function registerIpc() {
       subscribedWorkshopIds: mm.subscribedWorkshopIds,
       categories: mm.getCategories(),
       dataDir,
+      preferences: {
+        isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+      },
+    };
+  });
+
+  ipcMain.handle("get-preferences", async () => {
+    await ensureInit();
+    return {
+      isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+    };
+  });
+
+  ipcMain.handle("set-preferences", async (_e, patch: { isClosedOnPlay?: boolean }) => {
+    await ensureInit();
+    if (typeof patch.isClosedOnPlay === "boolean") {
+      mm.config.preferences.isClosedOnPlay = patch.isClosedOnPlay;
+    }
+    mm.saveConfig();
+    await mm.flush();
+    return {
+      ok: true,
+      preferences: {
+        isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+      },
     };
   });
 
@@ -560,13 +747,23 @@ function registerIpc() {
     return result;
   });
   ipcMain.handle("force-update-mod", async (_e, modName: string) => {
+    await ensureInit();
     const mod = mm.getMods().find(m => m.name === modName);
-    const result = await mm.forceUpdateMod(modName);
-    if (result.ok && mod?.workshopId) {
-      unlockPendingDownload(mod.workshopId);
-      await syncPendingWorkshopDownloads([mod.workshopId]);
+    const validation = await mm.forceUpdateMod(modName);
+    if (!validation.ok || !mod) {
+      return { ...validation, mods: mm.getMods(), outdatedCount: countOutdatedMods(mm.getMods()) };
     }
-    return { ...result, mods: mm.getMods(), outdatedCount: countOutdatedMods(mm.getMods()) };
+
+    const steamResult = await forceWorkshopUpdateViaSteam(mod);
+    notifyModsUpdated();
+    return {
+      ok: steamResult.ok,
+      error: steamResult.error,
+      errorCode: steamResult.errorCode,
+      downloadTriggered: steamResult.downloadTriggered,
+      mods: mm.getMods(),
+      outdatedCount: countOutdatedMods(mm.getMods()),
+    };
   });
   ipcMain.handle("trigger-workshop-download", async (_e, workshopId: string) => {
     await ensureInit();
@@ -584,7 +781,11 @@ function registerIpc() {
       }
       unlockPendingDownload(workshopId);
       lockPendingDownload(workshopId);
-      await triggerWorkshopDownloadsViaSteam(appId, [workshopId]);
+      const results = await triggerWorkshopDownloadsViaSteam(appId, [workshopId]);
+      const trigger = results.get(workshopId);
+      if (trigger && !workshopDownloadQueued(trigger)) {
+        unlockPendingDownload(workshopId);
+      }
       await mm.scanMods(scanWhileDownloadingOpts);
       mm.mods = await applyPendingDownloadStatus(mm.getMods());
       startPendingDownloadPoll();
@@ -596,8 +797,24 @@ function registerIpc() {
     }
   });
   ipcMain.handle("force-update-all-outdated", async () => {
-    const result = await mm.forceUpdateAllOutdated();
-    return { ...result, outdatedCount: countOutdatedMods(mm.getMods()) };
+    await ensureInit();
+    const outdated = mm.getMods().filter(m => isModOutdated(m));
+    const failed: string[] = [];
+    let updated = 0;
+
+    for (const mod of outdated) {
+      const validation = await mm.forceUpdateMod(mod.name);
+      if (!validation.ok) {
+        failed.push(mod.name);
+        continue;
+      }
+      const steamResult = await forceWorkshopUpdateViaSteam(mod);
+      if (steamResult.ok) updated++;
+      else failed.push(mod.name);
+    }
+
+    notifyModsUpdated();
+    return { updated, failed, mods: mm.getMods(), outdatedCount: countOutdatedMods(mm.getMods()) };
   });
 
   // ── 覆盖/冲突分析 ───────────────────────────────────────────────────────────
@@ -733,6 +950,7 @@ function registerIpc() {
     await ensureInit();
     try {
       pendingDownloadLocked.clear();
+      pendingDownloadLockedAt.clear();
       await mm.setGame(g as SupportedGame);
       void runDeferredWorkshopEnrichment();
       return {
@@ -805,85 +1023,98 @@ function registerIpc() {
   });
 
   ipcMain.handle("launch-game", async (_e, mods?: Mod[]) => {
+    if (gameLaunchInProgress) {
+      return { error: "Launch already in progress", errorCode: "LAUNCH_IN_PROGRESS" };
+    }
+
     const game = mm.currentGame;
     if (!game) return { error: "No game selected" };
 
-    // 使用当前会话中的 mod 状态（含未保存修改），不再重新 applyPreset
-    if (mods?.length) syncModsFromRenderer(mods);
+    if (isGameProcessRunning(game.processName)) {
+      return { error: "Game is already running", errorCode: "GAME_ALREADY_RUNNING" };
+    }
 
-    const gamePath = mm.folderPaths?.gamePath;
-    const dataFolder = mm.folderPaths?.dataFolder;
-    if (!gamePath) return { error: "Game path not found" };
-    if (!dataFolder) return { error: "Data folder not found" };
+    gameLaunchInProgress = true;
+    try {
+      // 使用当前会话中的 mod 状态（含未保存修改），不再重新 applyPreset
+      if (mods?.length) syncModsFromRenderer(mods);
 
-    const enabledMods = mm.getEnabledMods();
+      const gamePath = mm.folderPaths?.gamePath;
+      const dataFolder = mm.folderPaths?.dataFolder;
+      if (!gamePath) return { error: "Game path not found" };
+      if (!dataFolder) return { error: "Data folder not found" };
 
-    // ── 1. 生成 used_mods.txt 内容 ──
-    // UI 列表越靠下优先级越高；写入 used_mods.txt / moddata 时会映射为
-    // CA 启动器语义（越靠前 = 优先级越高）。
-    const isLinux = process.platform === "linux";
-    const { text: usedModsText, modsToCopyToData } = generateUsedModsContent(
-      enabledMods,
-      dataFolder,
-      isLinux,
-    );
+      const enabledMods = mm.getEnabledMods();
 
-    // ── 2. 复制 data/modding/ 的 mod 到 data/ 目录 ──
-    for (const mod of modsToCopyToData) {
+      // ── 1. 生成 used_mods.txt 内容 ──
+      // UI 列表越靠下优先级越高；写入 used_mods.txt / moddata 时会映射为
+      // CA 启动器语义（越靠前 = 优先级越高）。
+      const isLinux = process.platform === "linux";
+      const { text: usedModsText, modsToCopyToData } = generateUsedModsContent(
+        enabledMods,
+        dataFolder,
+        isLinux,
+      );
+
+      // ── 2. 复制 data/modding/ 的 mod 到 data/ 目录 ──
+      for (const mod of modsToCopyToData) {
+        try {
+          const destPath = path.join(dataFolder, mod.name);
+          fs.copyFileSync(mod.path, destPath);
+        } catch (e: any) {
+          console.error(`[launcher] Failed to copy ${mod.name} to data:`, e.message);
+        }
+      }
+
+      // ── 3. 写入 used_mods.txt 到游戏根目录（不是 data 目录！）──
+      const usedModsPath = path.join(gamePath, "used_mods.txt");
+      const encoding = game.id === "shogun2" ? "utf16le" : "utf8";
+      let modListFileName = "used_mods.txt";
       try {
-        const destPath = path.join(dataFolder, mod.name);
-        fs.copyFileSync(mod.path, destPath);
+        fs.writeFileSync(usedModsPath, usedModsText, { encoding });
+        console.log(`[launcher] Written ${enabledMods.length} mods to ${usedModsPath}`);
       } catch (e: any) {
-        console.error(`[launcher] Failed to copy ${mod.name} to data:`, e.message);
+        // 某些游戏/安装可能没有写权限到根目录，回退到 my_mods.txt
+        console.error(`[launcher] Failed to write used_mods.txt:`, e.message);
+        modListFileName = "my_mods.txt";
+        try {
+          fs.writeFileSync(path.join(gamePath, "my_mods.txt"), usedModsText, { encoding });
+        } catch (e2: any) {
+          return { error: `Failed to write mod list: ${e2.message}` };
+        }
       }
-    }
 
-    // ── 3. 写入 used_mods.txt 到游戏根目录（不是 data 目录！）──
-    const usedModsPath = path.join(gamePath, "used_mods.txt");
-    const encoding = game.id === "shogun2" ? "utf16le" : "utf8";
-    let modListFileName = "used_mods.txt";
-    try {
-      fs.writeFileSync(usedModsPath, usedModsText, { encoding });
-      console.log(`[launcher] Written ${enabledMods.length} mods to ${usedModsPath}`);
-    } catch (e: any) {
-      // 某些游戏/安装可能没有写权限到根目录，回退到 my_mods.txt
-      console.error(`[launcher] Failed to write used_mods.txt:`, e.message);
-      modListFileName = "my_mods.txt";
+      // ── 4. 同步到 CA 启动器的 moddata.dat（作为备选/兼容）──
+      // 这样即使用户之后通过 Steam/CA 启动器启动，mod 状态也是一致的
       try {
-        fs.writeFileSync(path.join(gamePath, "my_mods.txt"), usedModsText, { encoding });
-      } catch (e2: any) {
-        return { error: `Failed to write mod list: ${e2.message}` };
-      }
-    }
-
-    // ── 4. 同步到 CA 启动器的 moddata.dat（作为备选/兼容）──
-    // 这样即使用户之后通过 Steam/CA 启动器启动，mod 状态也是一致的
-    try {
-      syncModsToLauncher(mm.getMods(), game.launcherGameId, {
-        log: (msg) => console.log(`[launcher] ${msg}`),
-      });
-    } catch (e: any) {
-      console.error(`[launcher] Failed to sync moddata.dat:`, e.message);
-    }
-
-    // ── 5. 为旧游戏创建 steam_appid.txt（Attila/Rome2/Shogun2 需要）──
-    if (["attila", "rome2", "shogun2"].includes(game.id)) {
-      const steamAppIdPath = path.join(gamePath, "steam_appid.txt");
-      try {
-        fs.writeFileSync(steamAppIdPath, game.steamId);
+        syncModsToLauncher(mm.getMods(), game.launcherGameId, {
+          log: (msg) => console.log(`[launcher] ${msg}`),
+        });
       } catch (e: any) {
-        console.error(`[launcher] Failed to create steam_appid.txt:`, e.message);
+        console.error(`[launcher] Failed to sync moddata.dat:`, e.message);
       }
-    }
 
-    // ── 6. 启动游戏可执行文件，并传递 used_mods.txt 作为命令行参数 ──
-    // 这是关键步骤！游戏 exe 接收到文件名参数后才会读取 mod 列表
-    const gameExePath = path.join(gamePath, game.processName);
-    if (!fs.existsSync(gameExePath)) {
-      return { error: `Game executable not found: ${gameExePath}` };
-    }
+      // ── 5. 为旧游戏创建 steam_appid.txt（Attila/Rome2/Shogun2 需要）──
+      if (["attila", "rome2", "shogun2"].includes(game.id)) {
+        const steamAppIdPath = path.join(gamePath, "steam_appid.txt");
+        try {
+          fs.writeFileSync(steamAppIdPath, game.steamId);
+        } catch (e: any) {
+          console.error(`[launcher] Failed to create steam_appid.txt:`, e.message);
+        }
+      }
 
-    try {
+      // ── 6. 启动游戏可执行文件，并传递 used_mods.txt 作为命令行参数 ──
+      // 这是关键步骤！游戏 exe 接收到文件名参数后才会读取 mod 列表
+      const gameExePath = path.join(gamePath, game.processName);
+      if (!fs.existsSync(gameExePath)) {
+        return { error: `Game executable not found: ${gameExePath}` };
+      }
+
+      if (isGameProcessRunning(game.processName)) {
+        return { error: "Game is already running", errorCode: "GAME_ALREADY_RUNNING" };
+      }
+
       if (isLinux) {
         // Linux: 通过 protontricks-launch 启动
         const batData = `protontricks-launch --cwd-app --appid ${game.steamId} "${gameExePath}" ${modListFileName};`;
@@ -903,6 +1134,8 @@ function registerIpc() {
       return { success: true, modsCount: enabledMods.length, closeOnPlay };
     } catch (e: any) {
       return { error: `Failed to launch game: ${e.message}` };
+    } finally {
+      setTimeout(() => { gameLaunchInProgress = false; }, GAME_LAUNCH_COOLDOWN_MS);
     }
   });
 }

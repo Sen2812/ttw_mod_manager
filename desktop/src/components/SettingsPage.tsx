@@ -12,6 +12,8 @@ export default function SettingsPage() {
   const [configPath, setConfigPath] = useState<string>("");
   const [copied, setCopied] = useState<string | null>(null);
   const [isChangingDir, setIsChangingDir] = useState(false);
+  const [closeOnPlay, setCloseOnPlay] = useState(false);
+  const [isSavingPreference, setIsSavingPreference] = useState(false);
 
   useEffect(() => {
     if (showSettingsPage) loadPaths();
@@ -23,8 +25,24 @@ export default function SettingsPage() {
       setDataDir(dir);
       setPresetsPath(`${dir}/presets-${currentGame}.json`);
       setConfigPath(`${dir}/mod-manager-config.json`);
+      const prefs = await window.api.getPreferences();
+      setCloseOnPlay(prefs.isClosedOnPlay);
     } catch (e) {
       console.error("Failed to load paths:", e);
+    }
+  };
+
+  const handleCloseOnPlayChange = async (enabled: boolean) => {
+    setCloseOnPlay(enabled);
+    setIsSavingPreference(true);
+    try {
+      const result = await window.api.setPreferences({ isClosedOnPlay: enabled });
+      if (result.ok) setCloseOnPlay(result.preferences.isClosedOnPlay);
+    } catch (e) {
+      console.error("Failed to save preference:", e);
+      setCloseOnPlay(!enabled);
+    } finally {
+      setIsSavingPreference(false);
     }
   };
 
@@ -93,6 +111,26 @@ export default function SettingsPage() {
             <p className="text-xs text-morandi-text-secondary mb-3">{t("settings.languageDesc")}</p>
             <div className="bg-morandi-sidebar rounded-lg p-4">
               <LanguageToggle />
+            </div>
+          </div>
+
+          {/* Launch Section */}
+          <div>
+            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.launch")}</h3>
+            <div className="bg-morandi-sidebar rounded-lg p-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={closeOnPlay}
+                  disabled={isSavingPreference}
+                  onChange={(e) => handleCloseOnPlayChange(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded border-morandi-border text-morandi-accent focus:ring-morandi-accent/30"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-morandi-text">{t("settings.closeOnPlay")}</span>
+                  <span className="block text-xs text-morandi-text-secondary mt-1 leading-relaxed">{t("settings.closeOnPlayDesc")}</span>
+                </span>
+              </label>
             </div>
           </div>
 

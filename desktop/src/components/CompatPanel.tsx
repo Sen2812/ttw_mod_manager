@@ -174,11 +174,14 @@ export default function CompatPanel() {
         </div>
 
         {/* 规则说明 */}
-        <div className="px-4 py-2.5 border-b border-morandi-border-light bg-morandi-sidebar/40 shrink-0">
+        <div className="px-4 py-2.5 border-b border-morandi-border-light bg-morandi-sidebar/40 shrink-0 space-y-2">
           <div className="flex items-start gap-2 text-xs text-morandi-text-secondary leading-relaxed">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-morandi-accent" />
             <p>{t("compat.ruleHint")}</p>
           </div>
+          <p className="text-[11px] text-morandi-text-muted leading-relaxed pl-5">
+            {t("compat.detectionScope")}
+          </p>
         </div>
 
         {/* 搜索栏 */}

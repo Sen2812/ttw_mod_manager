@@ -33,6 +33,7 @@ export interface AppConfigResponse {
   subscribedWorkshopIds?: string[];
   categories?: string[];
   dataDir?: string;
+  preferences?: { isClosedOnPlay: boolean };
 }
 
 export interface BootstrapResponse extends AppConfigResponse {
@@ -135,7 +136,18 @@ declare global {
         skippedNames?: string[];
         error?: string;
       }>;
-      launchGame: (mods?: Mod[]) => Promise<{ success?: boolean; error?: string; modsCount?: number; closeOnPlay?: boolean }>;
+      launchGame: (mods?: Mod[]) => Promise<{
+        success?: boolean;
+        error?: string;
+        errorCode?: "GAME_ALREADY_RUNNING" | "LAUNCH_IN_PROGRESS" | string;
+        modsCount?: number;
+        closeOnPlay?: boolean;
+      }>;
+      getPreferences: () => Promise<{ isClosedOnPlay: boolean }>;
+      setPreferences: (patch: { isClosedOnPlay?: boolean }) => Promise<{
+        ok: boolean;
+        preferences: { isClosedOnPlay: boolean };
+      }>;
       saveUiState: (s: any) => Promise<{ ok: boolean }>;
       saveModState: (m: Mod[]) => Promise<{ ok: boolean }>;
       savePresets: (p: Preset[]) => Promise<{ ok: boolean }>;
@@ -149,7 +161,14 @@ declare global {
       setModCategory: (modName: string, category: string | null) => Promise<{ mods: Mod[]; categories: string[] }>;
       addCustomCategory: (name: string) => Promise<string[]>;
       checkModUpdates: (force?: boolean) => Promise<{ mods: Mod[]; outdatedCount: number }>;
-      forceUpdateMod: (modName: string) => Promise<{ ok: boolean; error?: string; mods: Mod[]; outdatedCount: number }>;
+      forceUpdateMod: (modName: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        errorCode?: string;
+        downloadTriggered?: boolean;
+        mods: Mod[];
+        outdatedCount: number;
+      }>;
       triggerWorkshopDownload: (workshopId: string) => Promise<{
         ok: boolean;
         error?: string;
