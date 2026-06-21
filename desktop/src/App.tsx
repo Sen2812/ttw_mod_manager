@@ -61,20 +61,22 @@ function AppShell() {
   const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
+    const cleanups: Array<(() => void) | void> = [];
+
     const onModsUpdated = (payload: ModsUpdatedPayload) => {
       applyModsPayload(payload, setMods);
     };
 
-    if (typeof window.api.onModsUpdated === "function") {
-      window.api.onModsUpdated(onModsUpdated);
-    }
-
-    window.api.onPrerequisitesCheckStarted?.((modName) => {
+    cleanups.push(window.api.onModsUpdated?.(onModsUpdated));
+    cleanups.push(window.api.onPrerequisitesCheckStarted?.((modName) => {
       useStore.getState().setPrerequisiteChecking(modName, true);
-    });
-    window.api.onPrerequisitesCheckDone?.((modName) => {
+    }));
+    cleanups.push(window.api.onPrerequisitesCheckDone?.((modName) => {
       useStore.getState().setPrerequisiteChecking(modName, false);
-    });
+    }));
+    cleanups.push(window.api.onConfirmClose?.(() => {
+      setShowCloseConfirm(true);
+    }));
 
     (async () => {
       setIsScanning(true);
@@ -98,14 +100,10 @@ function AppShell() {
       }
     })();
 
-    window.api.onSaveBeforeClose(async () => {
-      await saveCurrentState();
-    });
-
-    window.api.onConfirmClose(() => {
-      setShowCloseConfirm(true);
-    });
-  }, []);
+    return () => {
+      for (const off of cleanups) off?.();
+    };
+  }, [setMods, setPresets, setGames, setCurrentGame, setFolderPaths, setIsScanning]);
 
   if (initError) {
     return (
@@ -143,9 +141,10 @@ function AppShell() {
         cancelText={t("common.cancel")}
         secondaryText={t("common.exitWithoutSaving")}
         variant="warning"
-        onConfirm={() => {
+        onConfirm={async () => {
           setShowCloseConfirm(false);
-          window.api.closeDecision("save");
+          const ok = await saveCurrentState();
+          window.api.closeDecision(ok ? "save" : "cancel");
         }}
         onSecondary={() => {
           setShowCloseConfirm(false);

@@ -7,7 +7,7 @@
  */
 
 import type { Mod } from "../types";
-import { isUsableWorkshopTitle, getModDisplayName } from "./mod-display";
+import { isUsableWorkshopTitle, getModDisplayName, resolveModWorkshopId } from "./mod-display";
 
 /** Why a prerequisite is unsatisfied. */
 export type DependencyIssueStatus =
@@ -43,7 +43,7 @@ export interface DependencyCheckContext {
 }
 
 function modByWorkshopId(mods: Mod[], workshopId: string): Mod | undefined {
-  return mods.find(m => m.workshopId === workshopId);
+  return mods.find(m => resolveModWorkshopId(m) === workshopId);
 }
 
 function modByPackName(mods: Mod[], packName: string): Mod | undefined {

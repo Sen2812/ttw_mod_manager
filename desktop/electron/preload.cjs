@@ -1,5 +1,13 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+function subscribe(channel, callback, mapPayload) {
+  const handler = mapPayload
+    ? (_e, payload) => callback(mapPayload(payload))
+    : () => callback();
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 const api = {
   getMods: () => ipcRenderer.invoke("get-mods"),
   bootstrap: () => ipcRenderer.invoke("bootstrap"),
@@ -44,24 +52,13 @@ const api = {
   forceUpdateAllOutdated: () => ipcRenderer.invoke("force-update-all-outdated"),
   openUrl: (url) => ipcRenderer.invoke("open-url", url),
   openFolder: (targetPath) => ipcRenderer.invoke("open-folder", targetPath),
-  onConfirmClose: (callback) => {
-    ipcRenderer.on("confirm-close", callback);
-  },
+  onConfirmClose: (callback) => subscribe("confirm-close", callback),
   closeDecision: (choice) => {
     ipcRenderer.send("close-decision", choice);
   },
-  onSaveBeforeClose: (callback) => {
-    ipcRenderer.on("save-before-close", callback);
-  },
-  onModsUpdated: (callback) => {
-    ipcRenderer.on("mods-updated", (_e, payload) => callback(payload));
-  },
-  onPrerequisitesCheckStarted: (callback) => {
-    ipcRenderer.on("prerequisites-check-started", (_e, modName) => callback(modName));
-  },
-  onPrerequisitesCheckDone: (callback) => {
-    ipcRenderer.on("prerequisites-check-done", (_e, modName) => callback(modName));
-  },
+  onModsUpdated: (callback) => subscribe("mods-updated", callback, (payload) => payload),
+  onPrerequisitesCheckStarted: (callback) => subscribe("prerequisites-check-started", callback, (modName) => modName),
+  onPrerequisitesCheckDone: (callback) => subscribe("prerequisites-check-done", callback, (modName) => modName),
 };
 
 contextBridge.exposeInMainWorld("api", api);

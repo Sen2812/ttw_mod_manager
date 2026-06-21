@@ -52,6 +52,7 @@ export class WorkshopCache {
   private readonly cachePath: string;
   private readonly legacyTimestampPath: string;
   private entries = new Map<string, WorkshopItemData>();
+  private static saveQueues = new Map<string, Promise<void>>();
 
   constructor(cacheDir: string) {
     this.cachePath = path.join(cacheDir, "workshop-cache.json");
@@ -100,12 +101,22 @@ export class WorkshopCache {
     return count;
   }
 
-  save(): void {
+  save(log?: (msg: string) => void): void {
+    const prev = WorkshopCache.saveQueues.get(this.cachePath) ?? Promise.resolve();
+    const next = prev
+      .then(() => this.saveSync())
+      .catch((e) => {
+        log?.(`Workshop cache write failed: ${e}`);
+      });
+    WorkshopCache.saveQueues.set(this.cachePath, next);
+  }
+
+  private saveSync(): void {
     try {
       const array = Array.from(this.entries.values());
       fs.writeFileSync(this.cachePath, JSON.stringify(array, null, 2), "utf8");
-    } catch {
-      // ignore write failures
+    } catch (e) {
+      throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
@@ -252,6 +263,13 @@ export class WorkshopCache {
     existing.requiredIdsFetchedAt = Date.now();
     existing.requiredIdsFetchFailed = fetchFailed;
     existing.requiredIdsCacheGeneration = REQUIRED_IDS_CACHE_GENERATION;
+    this.entries.set(id, existing);
+  }
+
+  /** Mark a failed prerequisite fetch without overwriting cached requiredIds. */
+  markRequiredIdsFetchFailed(id: string): void {
+    const existing = this.entries.get(id) ?? { publishedfileid: id };
+    existing.requiredIdsFetchFailed = true;
     this.entries.set(id, existing);
   }
 

@@ -15,7 +15,8 @@ import { fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-depende
 import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
 import { formatSteamFetchSkipReason, isSteamIpcUnavailableError } from "./steam-ipc-error";
 import { fetchSubscribedWorkshopIds } from "./workshop-subscriptions-fetcher";
-import { applyWorkshopTitle, isUsableWorkshopTitle } from "./mod-display";
+import { applyWorkshopTitle, isUsableWorkshopTitle, resolveModWorkshopId } from "./mod-display";
+export { resolveModWorkshopId } from "./mod-display";
 import {
   WorkshopCache,
   REQUIRED_IDS_CACHE_GENERATION,
@@ -37,17 +38,6 @@ const TITLE_FETCH_DELAY_MS = 1500;
 
 function isNumericWorkshopId(id: string | undefined): id is string {
   return !!id && /^\d{5,15}$/.test(id);
-}
-
-/** Resolve a mod's numeric Steam Workshop ID from workshopId or pack file name. */
-export function resolveModWorkshopId(mod: Pick<Mod, "workshopId" | "name">): string | undefined {
-  const workshopId = mod.workshopId;
-  if (isNumericWorkshopId(workshopId)) return workshopId;
-  const fromName = mod.name.match(/^(\d{5,15})\.pack$/i);
-  if (fromName) return fromName[1];
-  const fromWorkshopField = /^(\d{5,15})\.pack$/i.exec(workshopId);
-  if (fromWorkshopField) return fromWorkshopField[1];
-  return undefined;
 }
 
 /** Workshop item IDs to resolve prerequisites for (mods + subscribed content folders). */
@@ -321,7 +311,7 @@ async function ensureWorkshopRequiredIds(
     }
     log?.(`Workshop required mods: Steam fetch failed: ${e}`);
     for (const id of needsFetch) {
-      cache.setRequiredIds(id, [], true);
+      cache.markRequiredIdsFetchFailed(id);
     }
     cache.save();
   }

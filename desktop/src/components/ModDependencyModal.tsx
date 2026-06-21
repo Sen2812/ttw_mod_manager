@@ -4,6 +4,7 @@ import { useT } from "../i18n";
 import { X, AlertTriangle, Package, Loader2 } from "lucide-react";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModDisplayName } from "@core/mod-manager/mod-display";
+import { useSteamStatus, isSteamWorkshopOnline } from "../hooks/useSteamStatus";
 import RequiredModIssueRow from "./RequiredModIssueRow";
 import type { Mod } from "../types";
 
@@ -17,6 +18,8 @@ export default function ModDependencyModal() {
   const markDirty = useStore(s => s.markDirty);
   const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
   const isChecking = useStore(s => focusModName ? !!s.prerequisiteChecking[focusModName] : false);
+  const steamStatus = useSteamStatus();
+  const steamOnline = isSteamWorkshopOnline(steamStatus);
 
   const mod = useMemo(
     () => mods.find(m => m.name === focusModName),
@@ -73,7 +76,11 @@ export default function ModDependencyModal() {
               <p className="text-sm text-morandi-text-muted">{t("dependency.checking")}</p>
             </div>
           ) : issues.length === 0 ? (
-            <p className="text-sm text-morandi-text-muted text-center py-8">{t("dependency.allSatisfied")}</p>
+            <p className="text-sm text-morandi-text-muted text-center py-8">
+              {!steamOnline && mod.workshopId
+                ? t("dependency.notCheckedOffline")
+                : t("dependency.allSatisfied")}
+            </p>
           ) : (
             <>
               <div className="text-[11px] text-morandi-text-muted mb-2">{t("dependency.missingRequiredList")}</div>

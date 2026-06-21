@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from "electron";
-import { exec, execSync } from "child_process";
+import { exec, execSync, spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 
@@ -166,6 +166,10 @@ function recordSteamIpcAvailable(available: boolean): void {
   cachedSteamIpc = { available, at: Date.now() };
 }
 
+function invalidateSteamIpcCache(): void {
+  cachedSteamIpc = null;
+}
+
 async function isSteamIpcAvailable(): Promise<boolean> {
   const now = Date.now();
   if (cachedSteamIpc && now - cachedSteamIpc.at < STEAM_IPC_CACHE_MS) {
@@ -233,7 +237,7 @@ function stopPendingDownloadPoll(): void {
 
 async function applyPendingDownloadStatus(mods: Mod[]): Promise<Mod[]> {
   const appId = getCurrentSteamAppId();
-  if (!appId) return mods;
+  if (!appId || !(await isSteamIpcAvailable())) return mods;
   const pending = mods.filter(m => m.pendingDownload && m.workshopId);
   if (pending.length === 0) return mods;
 
@@ -699,22 +703,37 @@ function registerIpc() {
       return { ok: false, error: e.message };
     }
   });
-  ipcMain.handle("toggle-mod", (_e, n: string) => {
+  ipcMain.handle("toggle-mod", async (_e, n: string) => {
+    await ensureInit();
     const mod = mm.getMods().find(m => m.name === n);
     const enabling = mod && !mod.isEnabled;
     mm.toggleMod(n);
     if (enabling) runModPrerequisitesCheck(n);
     return mm.getMods();
   });
-  ipcMain.handle("enable-mod", (_e, n: string) => {
+  ipcMain.handle("enable-mod", async (_e, n: string) => {
+    await ensureInit();
     mm.enableMod(n);
     runModPrerequisitesCheck(n);
     return mm.getMods();
   });
-  ipcMain.handle("disable-mod", (_e, n: string) => { mm.disableMod(n); return mm.getMods(); });
-  ipcMain.handle("enable-all", () => { mm.enableAll(); return mm.getMods(); });
-  ipcMain.handle("disable-all", () => { mm.disableAll(); return mm.getMods(); });
-  ipcMain.handle("apply-drag-order", (_e, names: string[]) => {
+  ipcMain.handle("disable-mod", async (_e, n: string) => {
+    await ensureInit();
+    mm.disableMod(n);
+    return mm.getMods();
+  });
+  ipcMain.handle("enable-all", async () => {
+    await ensureInit();
+    const skipped = mm.enableAll();
+    return { mods: mm.getMods(), skipped };
+  });
+  ipcMain.handle("disable-all", async () => {
+    await ensureInit();
+    mm.disableAll();
+    return mm.getMods();
+  });
+  ipcMain.handle("apply-drag-order", async (_e, names: string[]) => {
+    await ensureInit();
     const mods = mm.getMods();
     const map = new Map(mods.map(m => [m.name, m]));
     // names 是前端显示顺序（从上到下）。
@@ -730,19 +749,25 @@ function registerIpc() {
   });
 
   // ── 分类 ─────────────────────────────────────────────────────────────────
-  ipcMain.handle("get-categories", () => mm.getCategories());
-  ipcMain.handle("set-mod-category", (_e, modName: string, category: string | null) => {
+  ipcMain.handle("get-categories", async () => {
+    await ensureInit();
+    return mm.getCategories();
+  });
+  ipcMain.handle("set-mod-category", async (_e, modName: string, category: string | null) => {
+    await ensureInit();
     mm.setModCategory(modName, category);
     mm.syncCategoryRegistry();
     return { mods: mm.getMods(), categories: mm.getCategories() };
   });
-  ipcMain.handle("add-custom-category", (_e, name: string) => {
+  ipcMain.handle("add-custom-category", async (_e, name: string) => {
+    await ensureInit();
     mm.addCustomCategory(name);
     return mm.getCategories();
   });
 
   // ── 工坊更新 ─────────────────────────────────────────────────────────────
   ipcMain.handle("check-mod-updates", async (_e, force?: boolean) => {
+    await ensureInit();
     const result = await mm.checkModUpdates(force === true);
     return result;
   });
@@ -769,7 +794,17 @@ function registerIpc() {
     await ensureInit();
     const appId = getCurrentSteamAppId();
     if (!appId || !/^\d{5,15}$/.test(workshopId)) {
-      return { ok: false, error: "INVALID", mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
+      return { ok: false, error: "INVALID", errorCode: "INVALID", mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
+    }
+    if (!(await isSteamIpcAvailable())) {
+      invalidateSteamIpcCache();
+      return {
+        ok: false,
+        error: "Steam unavailable",
+        errorCode: "STEAM_UNAVAILABLE",
+        mods: mm.getMods(),
+        subscribedWorkshopIds: mm.subscribedWorkshopIds,
+      };
     }
     const payload = () => ({ mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds });
     try {
@@ -785,6 +820,14 @@ function registerIpc() {
       const trigger = results.get(workshopId);
       if (trigger && !workshopDownloadQueued(trigger)) {
         unlockPendingDownload(workshopId);
+        invalidateSteamIpcCache();
+        await mm.scanMods(scanWhileDownloadingOpts);
+        return {
+          ok: false,
+          error: "STEAM_DOWNLOAD_FAILED",
+          errorCode: "STEAM_DOWNLOAD_FAILED",
+          ...payload(),
+        };
       }
       await mm.scanMods(scanWhileDownloadingOpts);
       mm.mods = await applyPendingDownloadStatus(mm.getMods());
@@ -793,7 +836,8 @@ function registerIpc() {
       return { ok: true, ...payload() };
     } catch (e: any) {
       unlockPendingDownload(workshopId);
-      return { ok: false, error: e?.message ?? String(e), ...payload() };
+      invalidateSteamIpcCache();
+      return { ok: false, error: e?.message ?? String(e), errorCode: "STEAM_DOWNLOAD_FAILED", ...payload() };
     }
   });
   ipcMain.handle("force-update-all-outdated", async () => {
@@ -839,6 +883,7 @@ function registerIpc() {
   // 读取所有启用 mod 的 pack 内部文件索引，按加载顺序检测文件覆盖关系。
   // 每次勾选/取消都会触发，因此使用缓存让重复调用几乎是零成本。
   ipcMain.handle("analyze-overwrites", async () => {
+    await ensureInit();
     const enabledMods = mm.getEnabledMods();
     if (enabledMods.length === 0) {
       return { conflicts: [], modStats: {}, modsWithConflicts: 0, totalConflicts: 0 };
@@ -874,24 +919,32 @@ function registerIpc() {
   });
 
   // ── 保存 mod 状态（显式保存）────────────────────────────────────────────
-  ipcMain.handle("save-mod-state", (_e, mods: Mod[]) => {
+  ipcMain.handle("save-mod-state", async (_e, mods: Mod[]) => {
+    await ensureInit();
     syncModsFromRenderer(mods);
     mm.saveCurrentPreset();
+    await mm.flush();
     return { ok: true };
   });
 
   // ── 保存预设（显式保存）─────────────────────────────────────────────────
-  ipcMain.handle("save-presets", (_e, presets: Preset[]) => {
+  ipcMain.handle("save-presets", async (_e, presets: Preset[]) => {
+    await ensureInit();
     // Update core's presets
     const currentGame = mm.config.currentGame;
     mm.config.gamePresets[currentGame] = presets;
     mm.saveConfig();
+    await mm.flush();
     return { ok: true };
   });
 
   // ── 预设操作（使用 core 库的方法）──────────────────────────────────────
-  ipcMain.handle("get-presets", () => mm.getPresets());
-  ipcMain.handle("create-preset", (_e, n: string, copyFromCurrent?: boolean) => {
+  ipcMain.handle("get-presets", async () => {
+    await ensureInit();
+    return mm.getPresets();
+  });
+  ipcMain.handle("create-preset", async (_e, n: string, copyFromCurrent?: boolean) => {
+    await ensureInit();
     try {
       mm.createPreset(n, copyFromCurrent !== false);
       return mm.getPresets();
@@ -899,7 +952,8 @@ function registerIpc() {
       return { error: e.message };
     }
   });
-  ipcMain.handle("apply-preset", (_e, n: string) => {
+  ipcMain.handle("apply-preset", async (_e, n: string) => {
+    await ensureInit();
     try {
       mm.applyPreset(n);
       return mm.getMods();
@@ -907,19 +961,26 @@ function registerIpc() {
       return { error: e.message };
     }
   });
-  ipcMain.handle("set-active-preset-name", (_e, n: string | null) => {
+  ipcMain.handle("set-active-preset-name", async (_e, n: string | null) => {
+    await ensureInit();
     mm.setActivePresetName(n);
     return { ok: true };
   });
-  ipcMain.handle("delete-preset", (_e, n: string) => {
+  ipcMain.handle("delete-preset", async (_e, n: string) => {
+    await ensureInit();
     try {
       mm.deletePreset(n);
-      return mm.getPresets();
+      return {
+        presets: mm.getPresets(),
+        mods: mm.getMods(),
+        activePresetName: mm.getActivePresetName(),
+      };
     } catch (e: any) {
       return { error: e.message };
     }
   });
-  ipcMain.handle("rename-preset", (_e, oldName: string, newName: string) => {
+  ipcMain.handle("rename-preset", async (_e, oldName: string, newName: string) => {
+    await ensureInit();
     try {
       mm.renamePreset(oldName, newName);
       return { presets: mm.getPresets(), activePresetName: mm.getActivePresetName() };
@@ -927,7 +988,8 @@ function registerIpc() {
       return { error: e.message };
     }
   });
-  ipcMain.handle("update-preset", (_e, n: string) => {
+  ipcMain.handle("update-preset", async (_e, n: string) => {
+    await ensureInit();
     try {
       mm.replacePreset(n);
       return mm.getPresets();
@@ -936,11 +998,13 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle("export-profile-order", (_e, profileName: string, mods?: Mod[]) => {
+  ipcMain.handle("export-profile-order", async (_e, profileName: string, mods?: Mod[]) => {
+    await ensureInit();
     if (mods?.length) syncModsFromRenderer(mods);
     return writeProfileOrderExport(profileName ?? mm.getActivePresetName());
   });
-  ipcMain.handle("import-profile-order", (_e, mods?: Mod[]) => {
+  ipcMain.handle("import-profile-order", async (_e, mods?: Mod[]) => {
+    await ensureInit();
     if (mods?.length) syncModsFromRenderer(mods);
     return readProfileOrderImport();
   });
@@ -976,15 +1040,16 @@ function registerIpc() {
     return result.filePaths[0];
   });
   ipcMain.handle("set-data-dir", async (_e, newDir: string) => {
+    await ensureInit();
     ensureDataDir(newDir);
     const settings = loadSettings();
     settings.dataDir = newDir;
     saveSettings(settings);
     dataDir = newDir;
-    // 同步迁移 ModManager 到新目录（重新加载配置与扫描 mod）
+    appLog = createAppLogger(path.join(dataDir, APP_LOG_FILE));
     await mm.setConfigDir(newDir);
     void runDeferredWorkshopEnrichment();
-    return { ok: true, dataDir };
+    return { ok: true, dataDir, ...buildBootstrapPayload() };
   });
 
   // ── 启动游戏 ─────────────────────────────────────────────────────────────
@@ -1023,6 +1088,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("launch-game", async (_e, mods?: Mod[]) => {
+    await ensureInit();
     if (gameLaunchInProgress) {
       return { error: "Launch already in progress", errorCode: "LAUNCH_IN_PROGRESS" };
     }
@@ -1057,11 +1123,13 @@ function registerIpc() {
       );
 
       // ── 2. 复制 data/modding/ 的 mod 到 data/ 目录 ──
+      const copyFailures: string[] = [];
       for (const mod of modsToCopyToData) {
         try {
           const destPath = path.join(dataFolder, mod.name);
           fs.copyFileSync(mod.path, destPath);
         } catch (e: any) {
+          copyFailures.push(mod.name);
           console.error(`[launcher] Failed to copy ${mod.name} to data:`, e.message);
         }
       }
@@ -1116,14 +1184,27 @@ function registerIpc() {
       }
 
       if (isLinux) {
-        // Linux: 通过 protontricks-launch 启动
         const batData = `protontricks-launch --cwd-app --appid ${game.steamId} "${gameExePath}" ${modListFileName};`;
-        exec(batData, (error) => { if (error) console.error(`[launcher] exec error:`, error); });
+        await new Promise<void>((resolve, reject) => {
+          exec(batData, (error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
       } else {
-        // Windows: 用 start 命令在游戏目录启动，传递 mod 列表文件名
-        // 参考 WH3-Mod-Manager 的实现
-        const batData = `start /d "${gamePath}" ${game.processName} ${modListFileName};`;
-        exec(batData, (error) => { if (error) console.error(`[launcher] exec error:`, error); });
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn(game.processName, [modListFileName], {
+            cwd: gamePath,
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          });
+          child.once("error", reject);
+          child.once("spawn", () => {
+            child.unref();
+            resolve();
+          });
+        });
       }
       console.log(`[launcher] Game launched with ${enabledMods.length} enabled mods`);
       const closeOnPlay = mm.config.preferences.isClosedOnPlay;
@@ -1131,7 +1212,12 @@ function registerIpc() {
         hasUnsavedChanges = false;
         setImmediate(() => mainWindow?.close());
       }
-      return { success: true, modsCount: enabledMods.length, closeOnPlay };
+      return {
+        success: true,
+        modsCount: enabledMods.length,
+        copyFailures,
+        closeOnPlay,
+      };
     } catch (e: any) {
       return { error: `Failed to launch game: ${e.message}` };
     } finally {
@@ -1177,16 +1263,19 @@ function createWindow() {
     isConfirmingClose = true;
     // 询问渲染进程，等待用户决定
     mainWindow!.webContents.send('confirm-close');
-    const choice = await new Promise<"save" | "discard" | "cancel">((resolve) => {
-      pendingCloseDecision = resolve;
-    });
+    const CLOSE_DECISION_TIMEOUT_MS = 60_000;
+    const choice = await Promise.race([
+      new Promise<"save" | "discard" | "cancel">((resolve) => {
+        pendingCloseDecision = resolve;
+      }),
+      new Promise<"save" | "discard" | "cancel">((resolve) => {
+        setTimeout(() => resolve("cancel"), CLOSE_DECISION_TIMEOUT_MS);
+      }),
+    ]);
     pendingCloseDecision = null;
     isConfirmingClose = false;
 
     if (choice === "save") {
-      // 保存并退出：通知渲染进程提交 saveModState
-      mainWindow!.webContents.send('save-before-close');
-      await new Promise(resolve => setTimeout(resolve, 200));
       try {
         await mm.flush();
       } catch (err) {

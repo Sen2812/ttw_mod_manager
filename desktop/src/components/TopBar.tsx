@@ -9,13 +9,14 @@ import clsx from "clsx";
 
 export default function TopBar() {
   const t = useT();
-  const { games, currentGame, showGameMenu, setShowGameMenu, isLaunching, setIsLaunching,
+  const { games, currentGame, showGameMenu, setShowGameMenu, isLaunching, setIsLaunching, isScanning,
     mods, setMods, setCurrentGame, setPresets, setIsScanning, setFolderPaths,
     setShowSettingsPage, isDirty, markClean, saveCurrentState } = useStore();
   const currentGameName = games.find(g => g.id === currentGame)?.name ?? t("topbar.loading");
   const [pendingGame, setPendingGame] = useState<{ id: string; name: string } | null>(null);
   const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [gameSwitchError, setGameSwitchError] = useState<string | null>(null);
 
   const resolveLaunchErrorMessage = (result: { error?: string; errorCode?: string }) => {
     if (result.errorCode === "GAME_ALREADY_RUNNING") return t("topbar.gameAlreadyRunning");
@@ -29,7 +30,7 @@ export default function TopBar() {
     try {
       const result = await window.api.setGame(gameId);
       if (result.error) {
-        console.error("Failed to switch game:", result.error);
+        setGameSwitchError(result.error);
         return;
       }
       if (result.mods) {
@@ -69,7 +70,9 @@ export default function TopBar() {
     setLaunchError(null);
     try {
       const result = await window.api.launchGame(mods);
-      if (result?.error) {
+      if (result?.copyFailures?.length) {
+        setLaunchError(t("topbar.launchCopyWarning", { n: result.copyFailures.length }));
+      } else if (result?.error) {
         setLaunchError(resolveLaunchErrorMessage(result));
         console.error("Failed to launch game:", result.error);
       }
@@ -127,7 +130,7 @@ export default function TopBar() {
         >
           <Settings className="w-4 h-4 text-morandi-text-secondary" />
         </button>
-        <button onClick={handleLaunch} disabled={isLaunching}
+        <button onClick={handleLaunch} disabled={isLaunching || isScanning}
           className="btn-morandi titlebar-no-drag flex items-center gap-2 !py-1.5 !px-4">
           {isLaunching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-current" />}
           <span>{t("topbar.launch")}</span>
@@ -145,8 +148,7 @@ export default function TopBar() {
       variant="warning"
       onConfirm={async () => {
         setShowLaunchConfirm(false);
-        await saveCurrentState();
-        doLaunch();
+        if (await saveCurrentState()) doLaunch();
       }}
       onSecondary={() => {
         setShowLaunchConfirm(false);
@@ -170,14 +172,30 @@ export default function TopBar() {
       open={pendingGame !== null}
       title={t("topbar.unsavedSwitchTitle")}
       message={pendingGame ? t("topbar.unsavedSwitchGameMsg", { game: pendingGame.name }) : ""}
-      confirmText={t("sidebar.switch")}
+      confirmText={t("topbar.switchSaveAndSwitch")}
+      secondaryText={t("topbar.switchWithoutSaving")}
       variant="warning"
-      onConfirm={() => {
+      onConfirm={async () => {
+        const g = pendingGame;
+        setPendingGame(null);
+        if (g && await saveCurrentState()) doGameChange(g.id);
+      }}
+      onSecondary={() => {
         const g = pendingGame;
         setPendingGame(null);
         if (g) doGameChange(g.id);
       }}
       onCancel={() => setPendingGame(null)}
+    />
+
+    <ConfirmDialog
+      open={gameSwitchError !== null}
+      title={t("topbar.gameSwitchErrorTitle")}
+      message={gameSwitchError ?? ""}
+      confirmText={t("common.done")}
+      variant="warning"
+      onConfirm={() => setGameSwitchError(null)}
+      onCancel={() => setGameSwitchError(null)}
     />
     </>
   );

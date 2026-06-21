@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ModDependencyReport } from "@core/mod-manager/dependency-checker";
-import type { Mod, Preset, GameInfo, OverwriteAnalysis, ModConflictStats } from "./types";
+import type { Mod, Preset, GameInfo, OverwriteAnalysis, ModConflictStats, BootstrapResponse } from "./types";
 
 interface AppState {
   mods: Mod[]; presets: Preset[]; games: GameInfo[]; currentGame: string;
@@ -29,6 +29,8 @@ interface AppState {
   updateFocusMod: string | null;
   showUpdateModal: boolean;
   isCheckingUpdates: boolean;
+  /** Last save failure message for sidebar feedback. */
+  saveError: string | null;
   /** Mod names currently undergoing background required-mod detection. */
   prerequisiteChecking: Record<string, boolean>;
   setMods: (m: Mod[]) => void; setPresets: (p: Preset[]) => void;
@@ -56,7 +58,8 @@ interface AppState {
   setIsCheckingUpdates: (v: boolean) => void;
   setPrerequisiteChecking: (modName: string, checking: boolean) => void;
   markDirty: () => void; markClean: () => void;
-  saveCurrentState: () => Promise<void>;
+  saveCurrentState: () => Promise<boolean>;
+  hydrateFromBootstrap: (data: BootstrapResponse) => void;
   filteredMods: () => Mod[]; enabledCount: () => number; totalCount: () => number;
   originalTotalCount: () => number;
 }
@@ -72,6 +75,7 @@ export const useStore = create<AppState>((set, get) => ({
   dependencyAlertsSuppressed: false,
   categories: [], categoryFilter: null,
   updateFocusMod: null, showUpdateModal: false, isCheckingUpdates: false,
+  saveError: null,
   prerequisiteChecking: {},
   setMods: (mods) => set({ mods }),
   setPresets: (presets) => set({ presets }),
@@ -93,6 +97,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
   refreshOverwriteStats: async (opts) => {
     if (!window.api) return;
+    if (opts?.full) set({ overwriteAnalysis: null });
     try {
       const result = await window.api.analyzeOverwrites();
       set({ overwriteStats: result.modStats });
@@ -135,20 +140,36 @@ export const useStore = create<AppState>((set, get) => ({
   },
   saveCurrentState: async () => {
     const { mods } = get();
-    if (!window.api) return;
-    set({ isSaving: true });
+    if (!window.api) return false;
+    set({ isSaving: true, saveError: null });
     try {
       await window.api.saveModState(mods);
-      set({ isDirty: false });
-      // 通知 electron 主进程已保存
+      set({ isDirty: false, saveError: null });
       window.api?.setUnsavedChanges(false).catch(console.error);
-      // 刷新 presets，让各 profile 的启用计数反映最新保存的状态
       set({ presets: await window.api.getPresets() });
+      return true;
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       console.error("Failed to save state:", e);
+      set({ saveError: msg });
+      return false;
     } finally {
       set({ isSaving: false });
     }
+  },
+  hydrateFromBootstrap: (data) => {
+    set({
+      mods: data.mods,
+      originalMods: data.mods,
+      presets: data.presets ?? [],
+      currentGame: data.currentGame,
+      folderPaths: data.folderPaths,
+      subscribedWorkshopIds: data.subscribedWorkshopIds ?? [],
+      categories: data.categories ?? [],
+      activePresetName: data.currentPresetName ?? null,
+      isDirty: false,
+      saveError: null,
+    });
   },
   filteredMods: () => {
     const { mods, filter } = get();

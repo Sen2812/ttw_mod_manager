@@ -4,9 +4,16 @@ import { useT, useI18nStore } from "../i18n";
 import { LanguageToggle } from "./LanguageToggle";
 import { X, FolderOpen, Copy, Check, RefreshCw, Gamepad2 } from "lucide-react";
 
+import type { BootstrapResponse } from "../types";
+
+function formatPath(base: string, ...parts: string[]): string {
+  const sep = base.includes("\\") ? "\\" : "/";
+  return [base, ...parts].join(sep);
+}
+
 export default function SettingsPage() {
   const t = useT();
-  const { showSettingsPage, setShowSettingsPage, currentGame, games, folderPaths } = useStore();
+  const { showSettingsPage, setShowSettingsPage, currentGame, games, folderPaths, hydrateFromBootstrap } = useStore();
   const [dataDir, setDataDir] = useState<string>("");
   const [presetsPath, setPresetsPath] = useState<string>("");
   const [configPath, setConfigPath] = useState<string>("");
@@ -23,8 +30,8 @@ export default function SettingsPage() {
     try {
       const dir = await window.api.getDataDir();
       setDataDir(dir);
-      setPresetsPath(`${dir}/presets-${currentGame}.json`);
-      setConfigPath(`${dir}/mod-manager-config.json`);
+      setPresetsPath(formatPath(dir, `presets-${currentGame}.json`));
+      setConfigPath(formatPath(dir, "mod-manager-config.json"));
       const prefs = await window.api.getPreferences();
       setCloseOnPlay(prefs.isClosedOnPlay);
     } catch (e) {
@@ -54,8 +61,11 @@ export default function SettingsPage() {
         const result = await window.api.setDataDir(newDir);
         if (result.ok) {
           setDataDir(result.dataDir);
-          setPresetsPath(`${result.dataDir}/presets-${currentGame}.json`);
-          setConfigPath(`${result.dataDir}/mod-manager-config.json`);
+          setPresetsPath(formatPath(result.dataDir, `presets-${currentGame}.json`));
+          setConfigPath(formatPath(result.dataDir, "mod-manager-config.json"));
+          if (result.mods) {
+            hydrateFromBootstrap(result as BootstrapResponse);
+          }
         }
       }
     } catch (e) {

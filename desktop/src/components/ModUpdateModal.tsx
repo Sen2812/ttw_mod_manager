@@ -42,7 +42,11 @@ export default function ModUpdateModal() {
       const result = await window.api.forceUpdateMod(mod.name);
       if (result.ok) {
         setMods(result.mods);
-        close();
+        if (result.downloadTriggered === false && status === "outdated") {
+          setError(t("update.error.STEAM_OFFLINE_KEPT_LOCAL"));
+        } else {
+          close();
+        }
       } else {
         const code = (result as { errorCode?: string }).errorCode ?? result.error;
         setError(t(`update.error.${code ?? "unknown"}`));

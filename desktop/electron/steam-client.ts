@@ -77,8 +77,12 @@ function runSteamSubOnce<T extends Record<string, unknown>>(
 
     child.once("error", (err) => finish(() => reject(err)));
     child.once("exit", (code) => {
-      if (!settled && code !== 0) {
-        finish(() => reject(new Error(`steam-sub exited with code ${code}`)));
+      if (!settled) {
+        finish(() => reject(new Error(
+          code === 0
+            ? "steam-sub exited without response"
+            : `steam-sub exited with code ${code}`,
+        )));
       }
     });
   });

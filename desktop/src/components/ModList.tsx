@@ -273,6 +273,7 @@ export default function ModList() {
   const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const pendingDependencyAlertRef = useRef<string | null>(null);
+  const dragReorderEnabled = viewMode === "all" && !filter && !categoryFilter;
 
   useEffect(() => {
     const onDone = (modName: string) => {
@@ -285,7 +286,8 @@ export default function ModList() {
         if (report) openDependencyAlert([report]);
       }
     };
-    window.api.onPrerequisitesCheckDone?.(onDone);
+    const off = window.api.onPrerequisitesCheckDone?.(onDone);
+    return () => off?.();
   }, [openDependencyAlert]);
 
   // 切换 game / profile 时自动加载已记忆的显示模式
@@ -386,10 +388,19 @@ export default function ModList() {
       if (result.subscribedWorkshopIds) {
         useStore.setState({ subscribedWorkshopIds: result.subscribedWorkshopIds });
       }
+      if (!result.ok) {
+        const code = result.errorCode ?? result.error ?? "unknown";
+        const errKey = `update.error.${code}`;
+        const errText = code in { STEAM_UNAVAILABLE: 1, STEAM_DOWNLOAD_FAILED: 1, INVALID: 1, unknown: 1 }
+          ? t(errKey)
+          : (result.error ?? code);
+        setImportMessage(t("modlist.workshopActionFailed", { error: errText }));
+      }
     } catch (e) {
       console.error("Failed to trigger workshop download:", e);
+      setImportMessage(t("modlist.workshopActionFailed", { error: String(e) }));
     }
-  }, [setMods]);
+  }, [setMods, t]);
 
   const handleCheckUpdates = useCallback(async () => {
     setIsCheckingUpdates(true);
@@ -410,6 +421,14 @@ export default function ModList() {
     try {
       const result = await window.api.forceUpdateAllOutdated();
       setMods(result.mods);
+      if (result.failed?.length) {
+        setImportMessage(t("modlist.updateAllResult", {
+          updated: String(result.updated),
+          failed: result.failed.join(", "),
+        }));
+      } else {
+        setImportMessage(t("modlist.updateAllSuccess", { n: result.updated }));
+      }
     } catch (e) {
       console.error("Failed to update all:", e);
     } finally {
@@ -454,9 +473,15 @@ export default function ModList() {
   const handleEnableAll = useCallback(async () => {
     try {
       const result = await window.api.enableAll();
-      if (Array.isArray(result)) { setMods(result); markDirty(); }
+      const mods = Array.isArray(result) ? result : result.mods;
+      const skipped = Array.isArray(result) ? [] : (result.skipped ?? []);
+      setMods(mods);
+      markDirty();
+      if (skipped.length > 0) {
+        setImportMessage(t("modlist.enableAllSkipped", { n: skipped.length }));
+      }
     } catch (e) { console.error("Failed to enable all:", e); }
-  }, [setMods, markDirty]);
+  }, [setMods, markDirty, t]);
 
   const handleDisableAll = useCallback(async () => {
     try {
@@ -497,6 +522,7 @@ export default function ModList() {
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     setActiveId(null);
+    if (!dragReorderEnabled) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const fullOldIndex = mods.findIndex(m => m.name === active.id);
@@ -514,7 +540,7 @@ export default function ModList() {
     } catch (e) {
       console.error("Failed to apply drag order:", e);
     }
-  }, [mods, setMods, markDirty]);
+  }, [mods, setMods, markDirty, dragReorderEnabled]);
 
   // ── 实时刷新覆盖统计 ──
   // 当启用的 mod 集合或其加载顺序变化时，防抖刷新后端覆盖统计。
@@ -598,6 +624,11 @@ export default function ModList() {
       {importMessage && (
         <div className="px-4 py-1.5 text-xs text-morandi-accent bg-morandi-accent/5 border-b border-morandi-border-light">
           {importMessage}
+        </div>
+      )}
+      {!dragReorderEnabled && !isScanning && filteredMods.length > 0 && (
+        <div className="px-4 py-1 text-[11px] text-morandi-text-muted border-b border-morandi-border-light">
+          {t("modlist.dragDisabledHint")}
         </div>
       )}
       <div className="flex-1 overflow-y-auto">

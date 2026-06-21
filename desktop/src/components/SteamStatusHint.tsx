@@ -1,47 +1,20 @@
-import { useEffect, useState } from "react";
+import { useSteamStatus } from "../hooks/useSteamStatus";
 import clsx from "clsx";
 import { useT } from "../i18n";
 
-const POLL_MS = 30_000;
-
-type SteamStatus = {
-  installed: boolean;
-  running: boolean;
-  ipcAvailable: boolean;
-  state: "not_installed" | "not_running" | "offline" | "online";
-};
-
 export default function SteamStatusHint() {
   const t = useT();
-  const [status, setStatus] = useState<SteamStatus | null>(null);
+  const status = useSteamStatus();
 
-  useEffect(() => {
-    if (!window.api.getSteamStatus) return;
-
-    let cancelled = false;
-    const refresh = () => {
-      void window.api.getSteamStatus?.().then((s) => {
-        if (!cancelled) setStatus(s);
-      }).catch(() => {
-        if (!cancelled) setStatus(null);
-      });
-    };
-
-    refresh();
-    const timer = setInterval(refresh, POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
-
-  if (!status?.installed) return null;
+  if (!status) return null;
 
   const tooltip = status.state === "online"
     ? t("steamStatus.runningTooltip")
     : status.state === "offline"
       ? t("steamStatus.offlineTooltip")
-      : t("steamStatus.notRunningTooltip");
+      : status.state === "not_running"
+        ? t("steamStatus.notRunningTooltip")
+        : t("steamStatus.notInstalledTooltip");
 
   const dotClass = status.state === "online"
     ? "bg-morandi-success"

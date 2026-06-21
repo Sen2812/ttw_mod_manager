@@ -210,17 +210,32 @@ export class ConfigManager {
 
   /** Perform the actual write of pendingWrite, guarding against re-entrancy */
   private async performWrite(): Promise<void> {
-    if (this.isWriting || !this.pendingWrite) return;
-    this.isWriting = true;
+    while (this.pendingWrite) {
+      if (this.isWriting) {
+        await new Promise<void>((resolve) => {
+          const wait = () => {
+            if (!this.isWriting) resolve();
+            else setTimeout(wait, 10);
+          };
+          wait();
+        });
+        continue;
+      }
 
-    try {
-      const toSave = prepareConfigForSave(this.pendingWrite);
-      await this.io.write(JSON.stringify(toSave));
-      this.pendingWrite = null;
-    } catch (e) {
-      console.error("Failed to write config:", e);
-    } finally {
-      this.isWriting = false;
+      this.isWriting = true;
+      const snapshot = this.pendingWrite;
+      try {
+        const toSave = prepareConfigForSave(snapshot);
+        await this.io.write(JSON.stringify(toSave));
+      } catch (e) {
+        console.error("Failed to write config:", e);
+        break;
+      } finally {
+        if (this.pendingWrite === snapshot) {
+          this.pendingWrite = null;
+        }
+        this.isWriting = false;
+      }
     }
   }
 

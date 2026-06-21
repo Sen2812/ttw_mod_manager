@@ -4,6 +4,7 @@
 
 import type { Mod } from "../types";
 import type { WorkshopItemData } from "./workshop-cache";
+import { resolveModWorkshopId } from "./mod-display";
 
 /** Allow small clock / filesystem skew when comparing timestamps. */
 export const UPDATE_TIME_TOLERANCE_MS = 60_000;
@@ -34,8 +35,9 @@ export function applyWorkshopTimeUpdatedToMods(
   data: Map<string, WorkshopItemData>,
 ): void {
   for (const mod of mods) {
-    if (!mod.workshopId || mod.isInData) continue;
-    const entry = data.get(mod.workshopId);
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId || mod.isInData) continue;
+    const entry = data.get(workshopId);
     if (entry?.timeUpdated) mod.lastChanged = entry.timeUpdated;
   }
 }

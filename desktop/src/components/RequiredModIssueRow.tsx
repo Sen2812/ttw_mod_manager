@@ -5,6 +5,7 @@ import { DownloadCloud, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import type { DependencyIssue } from "@core/mod-manager/dependency-checker";
 import type { Mod } from "../types";
+import { useSteamStatus, isSteamWorkshopOnline } from "../hooks/useSteamStatus";
 
 function shortPack(name: string): string {
   return name.replace(/\.pack$/i, "");
@@ -18,6 +19,9 @@ interface RequiredModIssueRowProps {
 export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredModIssueRowProps) {
   const t = useT();
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const steamStatus = useSteamStatus();
+  const steamOnline = isSteamWorkshopOnline(steamStatus);
 
   const handleEnable = async () => {
     if (!issue.matchedModName || busy) return;
@@ -32,21 +36,24 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
     }
   };
 
-  /** Subscribe or download via Steamworks — no browser / workshop page. */
   const handleSteamWorkshop = async () => {
-    if (issue.kind !== "workshop" || busy) return;
+    if (issue.kind !== "workshop" || busy || !steamOnline) return;
     setBusy(true);
+    setActionError(null);
     try {
       const result = await window.api.triggerWorkshopDownload(issue.id);
       if (Array.isArray(result.mods)) onModsUpdated(result.mods);
       if (result.subscribedWorkshopIds) {
         useStore.setState({ subscribedWorkshopIds: result.subscribedWorkshopIds });
       }
-      if (!result.ok && result.error) {
-        console.error("Steam workshop action failed:", result.error);
+      if (!result.ok) {
+        const code = result.errorCode ?? result.error ?? "unknown";
+        const known = ["STEAM_UNAVAILABLE", "STEAM_DOWNLOAD_FAILED", "INVALID", "unknown"];
+        setActionError(known.includes(code) ? t(`update.error.${code}`) : (result.error ?? code));
       }
     } catch (e) {
       console.error("Failed to subscribe/download workshop mod:", e);
+      setActionError(String(e));
     } finally {
       setBusy(false);
     }
@@ -101,11 +108,13 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
           <div className="text-sm font-medium text-morandi-text truncate">{issue.displayName}</div>
           <div className="text-[11px] text-morandi-text-muted font-mono truncate mt-0.5">{subtitle}</div>
           <div className="text-[11px] text-morandi-danger mt-0.5">{t("dependency.status.not_subscribed")}</div>
+          {actionError && <div className="text-[11px] text-morandi-danger mt-0.5">{actionError}</div>}
         </div>
         <button
           type="button"
           onClick={handleSteamWorkshop}
-          disabled={busy}
+          disabled={busy || !steamOnline}
+          title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
           className={clsx(
             "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
             "bg-morandi-accent-light/50 text-morandi-accent hover:bg-morandi-accent-light transition-colors",
@@ -128,11 +137,13 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
           <div className="text-sm font-medium text-morandi-text truncate">{issue.displayName}</div>
           <div className="text-[11px] text-morandi-text-muted font-mono truncate mt-0.5">{subtitle}</div>
           <div className="text-[11px] text-morandi-warning mt-0.5">{t("dependency.status.not_downloaded")}</div>
+          {actionError && <div className="text-[11px] text-morandi-danger mt-0.5">{actionError}</div>}
         </div>
         <button
           type="button"
           onClick={handleSteamWorkshop}
-          disabled={busy}
+          disabled={busy || !steamOnline}
+          title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
           className={clsx(
             "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
             "bg-morandi-warning-light/40 text-morandi-warning hover:bg-morandi-warning-light/60 transition-colors",
@@ -148,7 +159,6 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
     );
   }
 
-  // Pack dependency not installed locally
   return (
     <li className="flex items-center gap-3 py-2 border-b border-morandi-border-light/60 last:border-0">
       <div className="flex-1 min-w-0">

@@ -17,7 +17,7 @@ export default function Sidebar() {
   const { presets, activePresetName, setActivePresetName, setShowNewPresetModal,
     setMods, setPresets, enabledCount, totalCount, originalTotalCount,
     isDirty, isSaving, saveCurrentState, markClean, markDirty, currentGame, mods,
-    subscribedWorkshopIds, openDependencyAlert } = useStore();
+    subscribedWorkshopIds, openDependencyAlert, saveError } = useStore();
   const [presetToDelete, setPresetToDelete] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [importResultMsg, setImportResultMsg] = useState<string | null>(null);
@@ -68,7 +68,15 @@ export default function Sidebar() {
   const confirmDelete = async () => {
     if (!presetToDelete) return;
     const result = await window.api.deletePreset(presetToDelete);
-    if (Array.isArray(result)) {
+    if ("presets" in result && result.presets) {
+      setPresets(result.presets);
+      if (result.mods) {
+        setMods(result.mods);
+        useStore.setState({ originalMods: result.mods });
+        markClean();
+      }
+      if (result.activePresetName) setActivePresetName(result.activePresetName);
+    } else if (Array.isArray(result)) {
       setPresets(result);
       if (activePresetName === presetToDelete) setActivePresetName("Default");
     }
@@ -331,6 +339,9 @@ export default function Sidebar() {
             </>
           )}
         </button>
+        {saveError && (
+          <p className="mt-2 text-xs text-morandi-danger">{t("sidebar.saveFailed", { error: saveError })}</p>
+        )}
       </div>
 
       {/* 删除确认弹窗 */}
@@ -349,10 +360,16 @@ export default function Sidebar() {
         open={pendingSwitch !== null}
         title={t("sidebar.unsavedSwitchTitle")}
         message={pendingSwitch ? t("sidebar.unsavedSwitchMsg", { name: pendingSwitch }) : ""}
-        confirmText={t("sidebar.switch")}
+        confirmText={t("sidebar.switchSaveAndSwitch")}
+        secondaryText={t("sidebar.switchWithoutSaving")}
         variant="warning"
-        onConfirm={() => {
-          if (pendingSwitch) doApply(pendingSwitch);
+        onConfirm={async () => {
+          const name = pendingSwitch;
+          setPendingSwitch(null);
+          if (name && await saveCurrentState()) await doApply(name);
+        }}
+        onSecondary={() => {
+          if (pendingSwitch) void doApply(pendingSwitch);
           setPendingSwitch(null);
         }}
         onCancel={() => setPendingSwitch(null)}

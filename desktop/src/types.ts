@@ -108,7 +108,7 @@ declare global {
       toggleMod: (n: string) => Promise<Mod[] | ApiResponse>;
       enableMod: (n: string) => Promise<Mod[] | ApiResponse>;
       disableMod: (n: string) => Promise<Mod[] | ApiResponse>;
-      enableAll: () => Promise<Mod[] | ApiResponse>;
+      enableAll: () => Promise<{ mods: Mod[]; skipped?: string[] } | Mod[]>;
       disableAll: () => Promise<Mod[] | ApiResponse>;
       reorderMod: (n: string, i: number) => Promise<Mod[] | ApiResponse>;
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
@@ -123,7 +123,12 @@ declare global {
       getPresets: () => Promise<Preset[]>;
       createPreset: (n: string, copyFromCurrent?: boolean) => Promise<Preset[] | ApiResponse>;
       applyPreset: (n: string) => Promise<Mod[] | ApiResponse>;
-      deletePreset: (n: string) => Promise<Preset[] | ApiResponse>;
+      deletePreset: (n: string) => Promise<Preset[] | ApiResponse | {
+        presets: Preset[];
+        mods: Mod[];
+        activePresetName: string;
+        error?: string;
+      }>;
       renamePreset: (oldName: string, newName: string) => Promise<{ presets: Preset[]; activePresetName: string } | ApiResponse>;
       updatePreset: (n: string) => Promise<Preset[] | ApiResponse>;
       setActivePresetName: (n: string | null) => Promise<{ ok: boolean }>;
@@ -141,6 +146,7 @@ declare global {
         error?: string;
         errorCode?: "GAME_ALREADY_RUNNING" | "LAUNCH_IN_PROGRESS" | string;
         modsCount?: number;
+        copyFailures?: string[];
         closeOnPlay?: boolean;
       }>;
       getPreferences: () => Promise<{ isClosedOnPlay: boolean }>;
@@ -153,7 +159,7 @@ declare global {
       savePresets: (p: Preset[]) => Promise<{ ok: boolean }>;
       getDataDir: () => Promise<string>;
       selectDataDir: () => Promise<string | null>;
-      setDataDir: (d: string) => Promise<{ ok: boolean; dataDir: string }>;
+      setDataDir: (d: string) => Promise<{ ok: boolean; dataDir: string } & Partial<BootstrapResponse>>;
       setUnsavedChanges: (hasChanges: boolean) => Promise<{ ok: boolean }>;
       hasUnsavedChanges: () => Promise<boolean>;
       analyzeOverwrites: () => Promise<OverwriteAnalysis>;
@@ -172,6 +178,7 @@ declare global {
       triggerWorkshopDownload: (workshopId: string) => Promise<{
         ok: boolean;
         error?: string;
+        errorCode?: string;
         inProgress?: boolean;
         mods: Mod[];
         subscribedWorkshopIds?: string[];
@@ -181,12 +188,11 @@ declare global {
       openUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
       openFolder: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
       // 关闭确认
-      onConfirmClose: (callback: () => void) => void;
+      onConfirmClose: (callback: () => void) => (() => void) | void;
       closeDecision: (choice: "save" | "discard" | "cancel") => void;
-      onSaveBeforeClose: (callback: () => void) => void;
-      onModsUpdated: (callback: (payload: ModsUpdatedPayload) => void) => void;
-      onPrerequisitesCheckStarted?: (callback: (modName: string) => void) => void;
-      onPrerequisitesCheckDone?: (callback: (modName: string) => void) => void;
+      onModsUpdated: (callback: (payload: ModsUpdatedPayload) => void) => (() => void) | void;
+      onPrerequisitesCheckStarted?: (callback: (modName: string) => void) => (() => void) | void;
+      onPrerequisitesCheckDone?: (callback: (modName: string) => void) => (() => void) | void;
       minimize?: () => void;
       maximize?: () => void;
       close?: () => void;

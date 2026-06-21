@@ -37,3 +37,14 @@ export function applyWorkshopTitle(mod: Mod, title: string | undefined): boolean
   mod.humanName = title.trim();
   return true;
 }
+
+/** Resolve a mod's numeric Steam Workshop ID from workshopId or pack file name. */
+export function resolveModWorkshopId(mod: Pick<Mod, "workshopId" | "name">): string | undefined {
+  const workshopId = mod.workshopId;
+  if (/^\d{5,15}$/.test(workshopId)) return workshopId;
+  const fromName = mod.name.match(/^(\d{5,15})\.pack$/i);
+  if (fromName) return fromName[1];
+  const fromWorkshopField = /^(\d{5,15})\.pack$/i.exec(workshopId);
+  if (fromWorkshopField) return fromWorkshopField[1];
+  return undefined;
+}

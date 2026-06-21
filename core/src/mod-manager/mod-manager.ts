@@ -262,11 +262,18 @@ export class ModManager {
       };
     }
 
-    // If there's a saved current preset, restore it
+    // If there's a saved current preset, restore it (skip if preset was deleted)
     const savedCurrentPreset = this.config.gameCurrentPreset[this.config.currentGame];
     if (savedCurrentPreset) {
-      this.applyPresetToMods(savedCurrentPreset);
-      this.activePresetName = savedCurrentPreset.name;
+      const presetName = savedCurrentPreset.name;
+      const presetExists = presetName === "Default"
+        || presets.some((p) => p.name === presetName);
+      if (presetExists) {
+        this.applyPresetToMods(savedCurrentPreset);
+        this.activePresetName = presetName;
+      } else {
+        this.activePresetName = "Default";
+      }
     } else {
       // Otherwise, use default (all mods disabled)
       this.activePresetName = "Default";
@@ -327,7 +334,7 @@ export class ModManager {
     const savedPresets = this.config.gamePresets[this.config.currentGame] || [];
     // Return default + saved presets
     return [
-      { name: "Default", mods: this.defaultPreset?.mods || [], version: 2 },
+      { name: "Default", mods: (this.defaultPreset?.mods || []).map((m) => ({ ...m })), version: 2 },
       ...savedPresets,
     ];
   }
@@ -405,9 +412,16 @@ export class ModManager {
       name,
     );
     
-    // If we deleted the active preset, switch to Default
+    // If we deleted the active preset, switch to Default and persist state
     if (this.activePresetName === name) {
-      this.activePresetName = "Default";
+      this.applyPreset("Default");
+      return;
+    }
+
+    const savedCurrent = this.config.gameCurrentPreset[this.config.currentGame];
+    if (savedCurrent?.name === name) {
+      this.applyPreset("Default");
+      return;
     }
     
     this.saveConfig();
@@ -581,11 +595,17 @@ export class ModManager {
     }
   }
 
-  /** Enable all mods */
-  enableAll(): void {
+  /** Enable all mods (skips mods still pending download without a local pack). */
+  enableAll(): string[] {
+    const skipped: string[] = [];
     for (const mod of this.mods) {
+      if (mod.pendingDownload && !modHasLocalPack(mod)) {
+        skipped.push(mod.name);
+        continue;
+      }
       mod.isEnabled = true;
     }
+    return skipped;
   }
 
   /** Disable all mods (except always-enabled) */
