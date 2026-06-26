@@ -18,3 +18,20 @@ export function reorderModRelative(
   names.splice(insertAt, 0, modToMove);
   return names;
 }
+
+/** Move one mod to the top or bottom of the full load-order list. */
+export function reorderModToEdge(
+  mods: Mod[],
+  modName: string,
+  edge: "top" | "bottom",
+): string[] {
+  const names = mods.map(m => m.name);
+  const idx = names.indexOf(modName);
+  if (idx === -1) return names;
+  if (edge === "top" && idx === 0) return names;
+  if (edge === "bottom" && idx === names.length - 1) return names;
+  names.splice(idx, 1);
+  if (edge === "top") names.unshift(modName);
+  else names.push(modName);
+  return names;
+}
