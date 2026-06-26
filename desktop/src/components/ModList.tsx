@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
+import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, ArrowUpToLine, ArrowDownToLine, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
@@ -18,6 +18,7 @@ import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/categor
 import { getModDisplayName, hasWorkshopDisplayName } from "@core/mod-manager/mod-display";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
 import { getModDependencyReport } from "../utils/dependency-actions";
+import { reorderModToEdge } from "../utils/load-order";
 
 // ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
 
@@ -50,11 +51,16 @@ interface ModRowProps {
   categories: string[];
   onCategoryChange: (modName: string, category: string | null) => void;
   onAddCategory: (name: string) => void;
+  onMoveToTop: (mod: Mod) => void;
+  onMoveToBottom: (mod: Mod) => void;
+  isAtListTop: boolean;
+  isAtListBottom: boolean;
 }
 
 const ModRow = memo(function ModRow({
   mod, onToggle, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, dependencyIssueCount,
   hasUpdate, category, categories, onCategoryChange, onAddCategory,
+  onMoveToTop, onMoveToBottom, isAtListTop, isAtListBottom,
 }: ModRowProps) {
   const t = useT();
   const allMods = useStore(s => s.mods);
@@ -73,16 +79,38 @@ const ModRow = memo(function ModRow({
   const awaitingDownloadOnly = mod.pendingDownload && !(mod.size && mod.size > 0);
 
   return (
-    <div ref={setNodeRef} style={style}
+    <div ref={setNodeRef} style={style} data-mod-name={mod.name}
       className={clsx("group flex items-center gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50",
         isSortDragging && "opacity-50",
         isCheckingPrerequisites && "bg-morandi-accent-light/15",
         mod.pendingDownload && awaitingDownloadOnly && "bg-morandi-accent-light/10",
         mod.isEnabled ? "bg-morandi-card" : "bg-morandi-page/50")}
       onDoubleClick={() => onShowDetail(mod)}>
-      <div {...attributes} {...listeners}
-        className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none">
-        <GripVertical className="w-4 h-4 text-morandi-text-muted" />
+      <div className="flex items-center gap-0.5 shrink-0">
+        <div {...attributes} {...listeners}
+          className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none">
+          <GripVertical className="w-4 h-4 text-morandi-text-muted" />
+        </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onMoveToTop(mod); }}
+          disabled={isAtListTop}
+          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          title={t("modlist.moveToTopHint")}
+          aria-label={t("modlist.moveToTop")}
+        >
+          <ArrowUpToLine className="w-3.5 h-3.5 text-morandi-text-muted" />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onMoveToBottom(mod); }}
+          disabled={isAtListBottom}
+          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          title={t("modlist.moveToBottomHint")}
+          aria-label={t("modlist.moveToBottom")}
+        >
+          <ArrowDownToLine className="w-3.5 h-3.5 text-morandi-text-muted" />
+        </button>
       </div>
       <button onClick={(e) => { e.stopPropagation(); onToggle(mod); }}
         disabled={(isCheckingPrerequisites && !mod.isEnabled) || (awaitingDownloadOnly && !mod.isEnabled)}
@@ -542,6 +570,40 @@ export default function ModList() {
     }
   }, [mods, setMods, markDirty, dragReorderEnabled]);
 
+  const scrollModIntoView = useCallback((modName: string, edge: "top" | "bottom") => {
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-mod-name="${globalThis.CSS.escape(modName)}"]`)
+        ?.scrollIntoView({ block: edge === "top" ? "start" : "end", behavior: "smooth" });
+    });
+  }, []);
+
+  const applyOrder = useCallback(async (orderedNames: string[], scrollTarget?: { name: string; edge: "top" | "bottom" }) => {
+    try {
+      const result = await window.api.applyDragOrder(orderedNames);
+      if (Array.isArray(result)) {
+        setMods(result);
+        markDirty();
+        if (scrollTarget) scrollModIntoView(scrollTarget.name, scrollTarget.edge);
+      }
+    } catch (e) {
+      console.error("Failed to apply load order:", e);
+    }
+  }, [setMods, markDirty, scrollModIntoView]);
+
+  const handleMoveToTop = useCallback((mod: Mod) => {
+    void applyOrder(reorderModToEdge(mods, mod.name, "top"), { name: mod.name, edge: "top" });
+  }, [mods, applyOrder]);
+
+  const handleMoveToBottom = useCallback((mod: Mod) => {
+    void applyOrder(reorderModToEdge(mods, mod.name, "bottom"), { name: mod.name, edge: "bottom" });
+  }, [mods, applyOrder]);
+
+  const listEdgeByName = useMemo(() => {
+    const top = mods[0]?.name;
+    const bottom = mods[mods.length - 1]?.name;
+    return { top, bottom };
+  }, [mods]);
+
   // ── 实时刷新覆盖统计 ──
   // 当启用的 mod 集合或其加载顺序变化时，防抖刷新后端覆盖统计。
   // 签名包含所有启用 mod 的 name+loadOrder，勾选/取消/拖动都会改变它。
@@ -664,6 +726,10 @@ export default function ModList() {
                   categories={categories}
                   onCategoryChange={handleCategoryChange}
                   onAddCategory={handleAddCategory}
+                  onMoveToTop={handleMoveToTop}
+                  onMoveToBottom={handleMoveToBottom}
+                  isAtListTop={mod.name === listEdgeByName.top}
+                  isAtListBottom={mod.name === listEdgeByName.bottom}
                 />
               ))}
             </SortableContext>
