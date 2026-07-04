@@ -534,6 +534,7 @@ export default function ModList() {
       if (result.mods) setMods(result.mods);
       const parts: string[] = [];
       if (result.imported?.length) parts.push(t("modlist.importResult", { n: result.imported.length }));
+      if (result.overwritten?.length) parts.push(t("modlist.importOverwritten", { n: result.overwritten.length }));
       if (result.skipped?.length) parts.push(t("modlist.importSkipped", { n: result.skipped.length }));
       if (result.failed?.length) parts.push(t("modlist.importFailed", { n: result.failed.length }));
       setImportMessage(parts.length ? parts.join(" · ") : t("modlist.importNothing"));
@@ -543,6 +544,24 @@ export default function ModList() {
       setIsScanning(false);
     }
   }, [setMods, setIsScanning, t]);
+
+  const handleDeleteLocal = useCallback(async (mod: Mod) => {
+    try {
+      const result = await window.api.deleteLocalMod(mod.name);
+      if (!result.ok) {
+        const errorText = result.message ?? result.error ?? "unknown";
+        setImportMessage(t("modlist.deleteLocalFailed", { error: errorText }));
+        return;
+      }
+      if (result.mods) setMods(result.mods);
+      markDirty();
+      setSelectedMod(null);
+      setImportMessage(t("modlist.deleteLocalSuccess", { name: getModDisplayName(mod) }));
+    } catch (e) {
+      console.error("Failed to delete local mod:", e);
+      setImportMessage(t("modlist.deleteLocalFailed", { error: String(e) }));
+    }
+  }, [setMods, markDirty, t]);
 
   const handleDragStart = useCallback((e: DragStartEvent) => {
     setActiveId(e.active.id as string);
@@ -747,6 +766,7 @@ export default function ModList() {
           onCategoryChange={handleCategoryChange}
           onAddCategory={handleAddCategory}
           onShowUpdate={handleShowUpdate}
+          onDeleteLocal={handleDeleteLocal}
         />
       )}
     </div>

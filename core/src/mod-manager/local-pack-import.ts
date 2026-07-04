@@ -1,12 +1,13 @@
 /**
- * Import local .pack files into the game's data/modding/ folder.
+ * Import, overwrite, and delete local .pack files in the game's data/ tree.
  */
 
 import * as fs from "fs";
 import * as path from "path";
+import type { Mod } from "../types";
 import type { LogCallback } from "./mod-discovery";
 
-export type LocalPackSkipReason = "NOT_PACK" | "ALREADY_IMPORTED" | "VANILLA_PACK";
+export type LocalPackSkipReason = "NOT_PACK" | "VANILLA_PACK";
 
 export interface LocalPackSkipped {
   path: string;
@@ -20,8 +21,20 @@ export interface LocalPackFailed {
 
 export interface ImportLocalPacksResult {
   imported: string[];
+  overwritten: string[];
   skipped: LocalPackSkipped[];
   failed: LocalPackFailed[];
+}
+
+export interface DeleteLocalModResult {
+  ok: boolean;
+  error?: "NOT_FOUND" | "NOT_LOCAL_MOD" | "VANILLA_PACK" | "NO_GAME_PATH" | "DELETE_FAILED";
+  message?: string;
+}
+
+/** Mods under the game data/ folder (data/ or data/modding/), not Workshop content. */
+export function isLocalMod(mod: Pick<Mod, "isInData">): boolean {
+  return mod.isInData === true;
 }
 
 function copyThumbnails(sourcePackPath: string, fileName: string, dataFolder: string): void {
@@ -37,6 +50,10 @@ function copyThumbnails(sourcePackPath: string, fileName: string, dataFolder: st
   }
 }
 
+function deployPackToDest(sourcePath: string, destPath: string): void {
+  fs.copyFileSync(sourcePath, destPath);
+}
+
 export function importLocalPackFiles(options: {
   sourcePaths: string[];
   moddingFolder: string;
@@ -46,6 +63,7 @@ export function importLocalPackFiles(options: {
 }): ImportLocalPacksResult {
   const { sourcePaths, moddingFolder, dataFolder, vanillaPacks, log } = options;
   const imported: string[] = [];
+  const overwritten: string[] = [];
   const skipped: LocalPackSkipped[] = [];
   const failed: LocalPackFailed[] = [];
 
@@ -65,22 +83,28 @@ export function importLocalPackFiles(options: {
       continue;
     }
 
-    const destPath = path.join(moddingFolder, fileName);
-    if (fs.existsSync(destPath)) {
-      skipped.push({ path: sourcePath, reason: "ALREADY_IMPORTED" });
-      continue;
-    }
-
     if (!fs.existsSync(normalized)) {
       failed.push({ path: sourcePath, error: "SOURCE_NOT_FOUND" });
       continue;
     }
 
+    const destPath = path.join(moddingFolder, fileName);
+    const dataCopyPath = path.join(dataFolder, fileName);
+    const existed = fs.existsSync(destPath) || fs.existsSync(dataCopyPath);
+
     try {
-      fs.copyFileSync(normalized, destPath);
+      deployPackToDest(normalized, destPath);
+      if (fs.existsSync(dataCopyPath)) {
+        deployPackToDest(normalized, dataCopyPath);
+      }
       copyThumbnails(normalized, fileName, dataFolder);
-      imported.push(fileName);
-      log?.(`Imported local mod: ${fileName}`);
+      if (existed) {
+        overwritten.push(fileName);
+        log?.(`Overwrote local mod: ${fileName}`);
+      } else {
+        imported.push(fileName);
+        log?.(`Imported local mod: ${fileName}`);
+      }
     } catch (e) {
       failed.push({
         path: sourcePath,
@@ -89,5 +113,38 @@ export function importLocalPackFiles(options: {
     }
   }
 
-  return { imported, skipped, failed };
+  return { imported, overwritten, skipped, failed };
+}
+
+/** Remove a local mod's pack, optional data/ deploy copy, and thumbnails. */
+export function deleteLocalModFiles(options: {
+  mod: Mod;
+  moddingFolder: string;
+  dataFolder: string;
+  log?: LogCallback;
+}): void {
+  const { mod, moddingFolder, dataFolder, log } = options;
+  const baseName = mod.name.replace(/\.pack$/i, "");
+  const paths = new Set<string>();
+
+  if (mod.isInModding) {
+    paths.add(path.join(moddingFolder, mod.name));
+  }
+  paths.add(path.join(dataFolder, mod.name));
+  for (const ext of [".png", ".jpg"]) {
+    paths.add(path.join(dataFolder, baseName + ext));
+  }
+
+  for (const filePath of paths) {
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        log?.(`Deleted local mod file: ${filePath}`);
+      }
+    } catch (e) {
+      throw new Error(
+        `Failed to delete ${filePath}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 }
