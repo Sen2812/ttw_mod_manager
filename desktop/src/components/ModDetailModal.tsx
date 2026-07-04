@@ -1,13 +1,15 @@
 import { useT } from "../i18n";
-import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2 } from "lucide-react";
+import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
 import { useStore } from "../store";
 import type { Mod } from "../types";
 import ModCategorySelect from "./ModCategorySelect";
+import ConfirmDialog from "./ConfirmDialog";
 import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
 import { getModDisplayName } from "@core/mod-manager/mod-display";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
+import { isLocalMod } from "@core/mod-manager/local-pack-import";
 
 interface ModDetailModalProps {
   mod: Mod;
@@ -16,14 +18,17 @@ interface ModDetailModalProps {
   onCategoryChange: (modName: string, category: string | null) => void;
   onAddCategory: (name: string) => void;
   onShowUpdate?: (modName: string) => void;
+  onDeleteLocal?: (mod: Mod) => void;
 }
 
-export default function ModDetailModal({ mod, onClose, categories, onCategoryChange, onAddCategory, onShowUpdate }: ModDetailModalProps) {
+export default function ModDetailModal({ mod, onClose, categories, onCategoryChange, onAddCategory, onShowUpdate, onDeleteLocal }: ModDetailModalProps) {
   const t = useT();
   const [copied, setCopied] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
   const updateStatus = getModUpdateStatus(mod);
+  const canDeleteLocal = isLocalMod(mod) && !!onDeleteLocal;
 
   const displayName = getModDisplayName(mod);
   const workshopUrl = /^\d{5,15}$/.test(mod.workshopId)
@@ -261,12 +266,38 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
               <FolderOpen className="w-3.5 h-3.5" />
               {t("moddetail.openFolder")}
             </button>
+            {canDeleteLocal && (
+              <button
+                onClick={() => setDeleteConfirmOpen(true)}
+                className="btn-morandi-ghost text-xs flex items-center gap-1.5 text-morandi-danger hover:text-morandi-danger"
+                title={t("moddetail.deleteLocalHint")}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {t("moddetail.deleteLocal")}
+              </button>
+            )}
           </div>
           <button onClick={onClose} className="btn-morandi text-xs">
             {t("common.close")}
           </button>
         </div>
       </div>
+
+      {canDeleteLocal && (
+        <ConfirmDialog
+          open={deleteConfirmOpen}
+          title={t("moddetail.deleteConfirmTitle")}
+          message={t("moddetail.deleteConfirmMsg", { name: displayName })}
+          confirmText={t("common.delete")}
+          variant="danger"
+          onConfirm={() => {
+            setDeleteConfirmOpen(false);
+            onDeleteLocal!(mod);
+            onClose();
+          }}
+          onCancel={() => setDeleteConfirmOpen(false)}
+        />
+      )}
     </div>
   );
 }

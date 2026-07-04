@@ -101,8 +101,15 @@ declare global {
         cancelled?: boolean;
         error?: string;
         imported?: string[];
+        overwritten?: string[];
         skipped?: { path: string; reason: string }[];
         failed?: { path: string; error: string }[];
+        mods?: Mod[];
+      }>;
+      deleteLocalMod: (modName: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        message?: string;
         mods?: Mod[];
       }>;
       toggleMod: (n: string) => Promise<Mod[] | ApiResponse>;

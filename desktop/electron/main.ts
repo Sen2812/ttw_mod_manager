@@ -703,6 +703,13 @@ function registerIpc() {
       return { ok: false, error: e.message };
     }
   });
+  ipcMain.handle("delete-local-mod", async (_e, modName: string) => {
+    await ensureInit();
+    const result = mm.deleteLocalMod(modName);
+    if (!result.ok) return result;
+    await mm.scanMods({ deferNetwork: true, skipSteamSubscriptionFetch: pendingDownloadLocked.size > 0 });
+    return { ...result, mods: mm.getMods() };
+  });
   ipcMain.handle("toggle-mod", async (_e, n: string) => {
     await ensureInit();
     const mod = mm.getMods().find(m => m.name === n);

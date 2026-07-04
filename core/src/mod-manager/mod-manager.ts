@@ -39,7 +39,7 @@ import {
   type ImportProfileOrderResult,
 } from "./preset-order";
 import { isUsableWorkshopTitle } from "./mod-display";
-import { importLocalPackFiles, type ImportLocalPacksResult } from "./local-pack-import";
+import { importLocalPackFiles, deleteLocalModFiles, isLocalMod, type ImportLocalPacksResult, type DeleteLocalModResult } from "./local-pack-import";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
 
@@ -778,6 +778,41 @@ export class ModManager {
       vanillaPacks: this.vanillaPacks,
       log: this.log,
     });
+  }
+
+  /** Delete a local mod from disk and remove it from the current profile. */
+  deleteLocalMod(modName: string): DeleteLocalModResult {
+    if (!this.folderPaths.gamePath) {
+      return { ok: false, error: "NO_GAME_PATH" };
+    }
+
+    const mod = this.mods.find((m) => m.name === modName);
+    if (!mod) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    if (!isLocalMod(mod)) {
+      return { ok: false, error: "NOT_LOCAL_MOD" };
+    }
+    if (this.vanillaPacks.has(mod.name)) {
+      return { ok: false, error: "VANILLA_PACK" };
+    }
+
+    const moddingFolder = path.join(this.folderPaths.gamePath, "data", "modding");
+    const dataFolder = this.folderPaths.dataFolder ?? path.join(this.folderPaths.gamePath, "data");
+
+    try {
+      deleteLocalModFiles({ mod, moddingFolder, dataFolder, log: this.log });
+    } catch (e) {
+      return {
+        ok: false,
+        error: "DELETE_FAILED",
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
+
+    this.mods = this.mods.filter((m) => m.name !== modName);
+    this.saveCurrentPreset();
+    return { ok: true };
   }
 
   /** Import load order; skips mods not installed locally. */
