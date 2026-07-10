@@ -7,7 +7,7 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, ArrowUpToLine, ArrowDownToLine, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
+import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, ArrowUp, ArrowUpToLine, ArrowDownToLine, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
@@ -18,7 +18,7 @@ import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/categor
 import { getModDisplayName, hasWorkshopDisplayName } from "@core/mod-manager/mod-display";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
 import { getModDependencyReport } from "../utils/dependency-actions";
-import { reorderModToEdge } from "../utils/load-order";
+import { reorderModByStep, reorderModToEdge } from "../utils/load-order";
 
 // ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
 
@@ -53,6 +53,8 @@ interface ModRowProps {
   onAddCategory: (name: string) => void;
   onMoveToTop: (mod: Mod) => void;
   onMoveToBottom: (mod: Mod) => void;
+  onMoveUp: (mod: Mod) => void;
+  onMoveDown: (mod: Mod) => void;
   isAtListTop: boolean;
   isAtListBottom: boolean;
 }
@@ -60,7 +62,7 @@ interface ModRowProps {
 const ModRow = memo(function ModRow({
   mod, onToggle, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, dependencyIssueCount,
   hasUpdate, category, categories, onCategoryChange, onAddCategory,
-  onMoveToTop, onMoveToBottom, isAtListTop, isAtListBottom,
+  onMoveToTop, onMoveToBottom, onMoveUp, onMoveDown, isAtListTop, isAtListBottom,
 }: ModRowProps) {
   const t = useT();
   const allMods = useStore(s => s.mods);
@@ -91,6 +93,26 @@ const ModRow = memo(function ModRow({
           className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none">
           <GripVertical className="w-4 h-4 text-morandi-text-muted" />
         </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onMoveUp(mod); }}
+          disabled={isAtListTop}
+          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          title={t("modlist.moveUpHint")}
+          aria-label={t("modlist.moveUp")}
+        >
+          <ArrowUp className="w-3.5 h-3.5 text-morandi-text-muted" />
+        </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onMoveDown(mod); }}
+          disabled={isAtListBottom}
+          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          title={t("modlist.moveDownHint")}
+          aria-label={t("modlist.moveDown")}
+        >
+          <ArrowDown className="w-3.5 h-3.5 text-morandi-text-muted" />
+        </button>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onMoveToTop(mod); }}
@@ -589,20 +611,23 @@ export default function ModList() {
     }
   }, [mods, setMods, markDirty, dragReorderEnabled]);
 
-  const scrollModIntoView = useCallback((modName: string, edge: "top" | "bottom") => {
+  const scrollModIntoView = useCallback((modName: string, block: ScrollLogicalPosition = "nearest") => {
     requestAnimationFrame(() => {
       document.querySelector(`[data-mod-name="${globalThis.CSS.escape(modName)}"]`)
-        ?.scrollIntoView({ block: edge === "top" ? "start" : "end", behavior: "smooth" });
+        ?.scrollIntoView({ block, behavior: "smooth" });
     });
   }, []);
 
-  const applyOrder = useCallback(async (orderedNames: string[], scrollTarget?: { name: string; edge: "top" | "bottom" }) => {
+  const applyOrder = useCallback(async (
+    orderedNames: string[],
+    scroll?: { modName: string; block?: ScrollLogicalPosition },
+  ) => {
     try {
       const result = await window.api.applyDragOrder(orderedNames);
       if (Array.isArray(result)) {
         setMods(result);
         markDirty();
-        if (scrollTarget) scrollModIntoView(scrollTarget.name, scrollTarget.edge);
+        if (scroll) scrollModIntoView(scroll.modName, scroll.block ?? "nearest");
       }
     } catch (e) {
       console.error("Failed to apply load order:", e);
@@ -610,11 +635,19 @@ export default function ModList() {
   }, [setMods, markDirty, scrollModIntoView]);
 
   const handleMoveToTop = useCallback((mod: Mod) => {
-    void applyOrder(reorderModToEdge(mods, mod.name, "top"), { name: mod.name, edge: "top" });
+    void applyOrder(reorderModToEdge(mods, mod.name, "top"), { modName: mod.name, block: "start" });
   }, [mods, applyOrder]);
 
   const handleMoveToBottom = useCallback((mod: Mod) => {
-    void applyOrder(reorderModToEdge(mods, mod.name, "bottom"), { name: mod.name, edge: "bottom" });
+    void applyOrder(reorderModToEdge(mods, mod.name, "bottom"), { modName: mod.name, block: "end" });
+  }, [mods, applyOrder]);
+
+  const handleMoveUp = useCallback((mod: Mod) => {
+    void applyOrder(reorderModByStep(mods, mod.name, "up"), { modName: mod.name });
+  }, [mods, applyOrder]);
+
+  const handleMoveDown = useCallback((mod: Mod) => {
+    void applyOrder(reorderModByStep(mods, mod.name, "down"), { modName: mod.name });
   }, [mods, applyOrder]);
 
   const listEdgeByName = useMemo(() => {
@@ -747,6 +780,8 @@ export default function ModList() {
                   onAddCategory={handleAddCategory}
                   onMoveToTop={handleMoveToTop}
                   onMoveToBottom={handleMoveToBottom}
+                  onMoveUp={handleMoveUp}
+                  onMoveDown={handleMoveDown}
                   isAtListTop={mod.name === listEdgeByName.top}
                   isAtListBottom={mod.name === listEdgeByName.bottom}
                 />
