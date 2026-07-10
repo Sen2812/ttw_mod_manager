@@ -12,6 +12,22 @@ function countEnabled(mods: { isEnabled: boolean }[]): number {
   return mods.filter((m) => m.isEnabled).length;
 }
 
+function buildProfileTooltip(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  name: string,
+  enabled: number,
+  total: number,
+  isActive: boolean,
+): string {
+  const lines = [
+    name,
+    t("sidebar.modsCount", { n: total, m: enabled }),
+  ];
+  if (isActive) lines.push(t("sidebar.profileTooltipActive"));
+  else lines.push(t("sidebar.profileTooltipSwitch"));
+  return lines.join("\n");
+}
+
 export default function Sidebar() {
   const t = useT();
   const { presets, activePresetName, setActivePresetName, setShowNewPresetModal,
@@ -194,6 +210,13 @@ export default function Sidebar() {
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {/* Default Profile */}
         <button onClick={() => handleApply("Default")}
+          title={buildProfileTooltip(
+            t,
+            t("sidebar.defaultProfile"),
+            defaultCount,
+            totalCount(),
+            activePresetName === "Default",
+          )}
           className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-150",
             activePresetName === "Default" ? "bg-morandi-sidebar-active text-morandi-text font-medium shadow-sm"
             : "text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text")}>
@@ -250,6 +273,13 @@ export default function Sidebar() {
                 // ── 普通模式 ──
                 <>
                   <button onClick={() => handleApply(preset.name)}
+                    title={buildProfileTooltip(
+                      t,
+                      preset.name,
+                      isActive ? enabledCount() : countEnabled(preset.mods),
+                      originalTotalCount(),
+                      isActive,
+                    )}
                     className="flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2 text-sm text-left">
                     <span className={clsx("truncate",
                       isActive ? "text-morandi-text font-medium" : "text-morandi-text-secondary")}>

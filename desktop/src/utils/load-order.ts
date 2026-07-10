@@ -19,6 +19,21 @@ export function reorderModRelative(
   return names;
 }
 
+/** Swap one mod up or down by one row in the full load-order list. */
+export function reorderModByStep(
+  mods: Mod[],
+  modName: string,
+  direction: "up" | "down",
+): string[] {
+  const names = mods.map(m => m.name);
+  const idx = names.indexOf(modName);
+  if (idx === -1) return names;
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= names.length) return names;
+  [names[idx], names[swapIdx]] = [names[swapIdx], names[idx]];
+  return names;
+}
+
 /** Move one mod to the top or bottom of the full load-order list. */
 export function reorderModToEdge(
   mods: Mod[],
