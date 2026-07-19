@@ -70,6 +70,8 @@ export const en: Record<string, string> = {
   "sidebar.saveFailed": "Save failed: {error}",
   "sidebar.switch": "Switch",
   "sidebar.defaultProfile": "Default",
+  "sidebar.profileTooltipActive": "Active profile",
+  "sidebar.profileTooltipSwitch": "Click to switch to this profile",
   "sidebar.exportOrder": "Export order",
   "sidebar.importOrder": "Import order",
   "sidebar.importTitle": "Import load order",
