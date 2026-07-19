@@ -6,6 +6,7 @@ import Sidebar from "./components/Sidebar";
 import ModList from "./components/ModList";
 import NewPresetModal from "./components/NewPresetModal";
 import SettingsPage from "./components/SettingsPage";
+import FeaturesPage from "./components/FeaturesPage";
 import CompatPanel from "./components/CompatPanel";
 import ModDependencyModal from "./components/ModDependencyModal";
 import ModUpdateModal from "./components/ModUpdateModal";
@@ -38,13 +39,13 @@ async function loadBootstrapData(): Promise<BootstrapResponse> {
 }
 
 function ApiMissingScreen() {
+  const t = useT();
   return (
     <div className="h-screen flex items-center justify-center bg-morandi-page p-8">
       <div className="max-w-md text-center space-y-3">
-        <h1 className="text-lg font-semibold text-morandi-text">界面加载失败</h1>
+        <h1 className="text-lg font-semibold text-morandi-text">{t("app.apiMissing")}</h1>
         <p className="text-sm text-morandi-text-secondary">
-          未检测到 Electron 接口（window.api）。请在 <code className="text-xs">desktop</code> 目录运行{" "}
-          <code className="text-xs">npm run dev</code> 启动应用，不要单独用浏览器打开 Vite 页面。
+          {t("app.apiMissingHint")}
         </p>
       </div>
     </div>
@@ -106,10 +107,10 @@ function AppShell() {
     return (
       <div className="h-screen flex items-center justify-center bg-morandi-page p-8">
         <div className="max-w-md text-center space-y-3">
-          <h1 className="text-lg font-semibold text-morandi-text">界面加载失败</h1>
+          <h1 className="text-lg font-semibold text-morandi-text">{t("app.loadFailed")}</h1>
           <p className="text-sm text-morandi-text-secondary break-words">{initError}</p>
           <button type="button" className="btn-morandi text-sm" onClick={() => window.location.reload()}>
-            重新加载
+            {t("app.loadFailedReload")}
           </button>
         </div>
       </div>
@@ -125,6 +126,7 @@ function AppShell() {
       </div>
       <NewPresetModal />
       <SettingsPage />
+      <FeaturesPage />
       <CompatPanel />
       <ModDependencyModal />
       <ModUpdateModal />

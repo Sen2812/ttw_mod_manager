@@ -4,14 +4,14 @@ import { useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 import { LanguageToggle } from "./LanguageToggle";
 import SteamStatusHint from "./SteamStatusHint";
-import { Gamepad2, ChevronDown, Play, Loader2, Settings } from "lucide-react";
+import { Gamepad2, ChevronDown, Play, Loader2, Settings, Sparkles } from "lucide-react";
 import clsx from "clsx";
 
 export default function TopBar() {
   const t = useT();
   const { games, currentGame, showGameMenu, setShowGameMenu, isLaunching, setIsLaunching, isScanning,
     mods, setMods, setCurrentGame, setPresets, setIsScanning, setFolderPaths,
-    setShowSettingsPage, isDirty, markClean, saveCurrentState } = useStore();
+    setShowSettingsPage, setShowFeaturesPage, isDirty, markClean, saveCurrentState } = useStore();
   const currentGameName = games.find(g => g.id === currentGame)?.name ?? t("topbar.loading");
   const [pendingGame, setPendingGame] = useState<{ id: string; name: string } | null>(null);
   const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
@@ -121,6 +121,13 @@ export default function TopBar() {
       <div className="flex items-center gap-2">
         <SteamStatusHint />
         <LanguageToggle compact />
+        <button
+          onClick={() => setShowFeaturesPage(true)}
+          className="titlebar-no-drag icon-btn"
+          title={t("topbar.features")}
+        >
+          <Sparkles className="w-4 h-4 text-morandi-text-secondary" />
+        </button>
         <button
           onClick={() => setShowSettingsPage(true)}
           className="titlebar-no-drag icon-btn"

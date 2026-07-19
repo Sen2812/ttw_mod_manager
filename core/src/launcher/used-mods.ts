@@ -25,11 +25,24 @@ import * as path from "path";
 import { Mod } from "../types";
 import { sortByLoadOrder } from "../mod-manager/mod-sorting";
 
+export interface StartGamePackRef {
+  /** Absolute path to the directory containing the temp pack. */
+  workDir: string;
+  /** Pack file name (e.g. !!!!out.pack). */
+  packName: string;
+}
+
 export interface UsedModsContent {
   /** The text to write into used_mods.txt. */
   text: string;
   /** Mods that live in data/modding/ and must be copied into data/ first. */
   modsToCopyToData: Mod[];
+}
+
+export interface GenerateUsedModsOptions {
+  isLinux?: boolean;
+  /** Optional start-game helper pack (skip intro, etc.) — highest load priority. */
+  startGamePack?: StartGamePackRef;
 }
 
 /**
@@ -43,8 +56,10 @@ export interface UsedModsContent {
 export function generateUsedModsContent(
   enabledMods: Mod[],
   dataFolder: string,
-  isLinux: boolean = false,
+  options: GenerateUsedModsOptions = {},
 ): UsedModsContent {
+  const isLinux = options.isLinux ?? false;
+  const startGamePack = options.startGamePack;
   // UI: top = low priority, bottom = high priority.
   // Game / CA launcher: earlier in file = higher priority.
   const sorted = [...sortByLoadOrder(enabledMods)].reverse();
@@ -70,12 +85,19 @@ export function generateUsedModsContent(
   const lines: string[] = [];
 
   // 1. Working directories first (so the game knows where to find packs)
+  if (startGamePack) {
+    const dir = startGamePack.workDir.replace(/\\/g, "/");
+    lines.push(`add_working_directory "${prefix}${dir}";`);
+  }
   for (const mod of modsNeedingWorkDir) {
     const dir = mod.modDirectory.replace(/\\/g, "/");
     lines.push(`add_working_directory "${prefix}${dir}";`);
   }
 
   // 2. All mod entries in game priority order (highest priority first)
+  if (startGamePack) {
+    lines.push(`mod "${startGamePack.packName}";`);
+  }
   for (const mod of sorted) {
     lines.push(`mod "${mod.name}";`);
   }

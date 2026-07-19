@@ -22,7 +22,11 @@ export interface Mod {
 
 export interface Preset { name: string; mods: Mod[]; version?: number; }
 
-export interface GameInfo { id: string; name: string; }
+export interface GameInfo {
+  id: string;
+  name: string;
+  supportedOptions?: string[];
+}
 
 export interface AppConfigResponse {
   currentGame: string; games: GameInfo[]; presets: Preset[];
@@ -30,7 +34,7 @@ export interface AppConfigResponse {
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
   subscribedWorkshopIds?: string[];
   dataDir?: string;
-  preferences?: { isClosedOnPlay: boolean };
+  preferences?: { isClosedOnPlay: boolean; isSkipIntroMoviesEnabled?: boolean };
 }
 
 export interface BootstrapResponse extends AppConfigResponse {
@@ -151,10 +155,13 @@ declare global {
         copyFailures?: string[];
         closeOnPlay?: boolean;
       }>;
-      getPreferences: () => Promise<{ isClosedOnPlay: boolean }>;
-      setPreferences: (patch: { isClosedOnPlay?: boolean }) => Promise<{
+      getPreferences: () => Promise<{ isClosedOnPlay: boolean; isSkipIntroMoviesEnabled: boolean }>;
+      setPreferences: (patch: {
+        isClosedOnPlay?: boolean;
+        isSkipIntroMoviesEnabled?: boolean;
+      }) => Promise<{
         ok: boolean;
-        preferences: { isClosedOnPlay: boolean };
+        preferences: { isClosedOnPlay: boolean; isSkipIntroMoviesEnabled: boolean };
       }>;
       saveUiState: (s: any) => Promise<{ ok: boolean }>;
       saveModState: (m: Mod[]) => Promise<{ ok: boolean }>;
