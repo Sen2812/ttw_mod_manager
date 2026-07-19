@@ -50,23 +50,6 @@ export function reorderEnabledModByStep(
   return names;
 }
 
-/** Move one enabled mod to the top or bottom of the profile list. */
-export function reorderEnabledModToEdge(
-  mods: Mod[],
-  modName: string,
-  edge: "top" | "bottom",
-): string[] {
-  const names = getEnabledModNames(mods);
-  const idx = names.indexOf(modName);
-  if (idx === -1) return names;
-  if (edge === "top" && idx === 0) return names;
-  if (edge === "bottom" && idx === names.length - 1) return names;
-  names.splice(idx, 1);
-  if (edge === "top") names.unshift(modName);
-  else names.push(modName);
-  return names;
-}
-
 /** Place an enabled mod before `beforeModName`, or append when null. */
 export function insertEnabledModInOrder(
   mods: Mod[],
@@ -83,13 +66,4 @@ export function insertEnabledModInOrder(
   const at = names.indexOf(beforeModName);
   names.splice(at >= 0 ? at : names.length, 0, modName);
   return names;
-}
-
-/** @deprecated Use reorderEnabledModToEdge for profile panel. */
-export function reorderModToEdge(
-  mods: Mod[],
-  modName: string,
-  edge: "top" | "bottom",
-): string[] {
-  return reorderEnabledModToEdge(mods, modName, edge);
 }

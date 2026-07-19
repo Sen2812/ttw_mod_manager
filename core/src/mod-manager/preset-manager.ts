@@ -2,7 +2,7 @@
  * Preset Manager
  *
  * Manages mod presets — named snapshots of which mods are enabled and their order.
- * Handles preset CRUD, application, import/export, and bisect for debugging.
+ * Handles preset CRUD, application, and bisect for debugging.
  */
 
 import { Mod, Preset } from "../types";
@@ -27,15 +27,6 @@ export function createPreset(
   };
 }
 
-/** Clone a preset with a new name */
-export function clonePreset(preset: Preset, newName: string): Preset {
-  return {
-    name: newName,
-    mods: preset.mods.map((m) => ({ ...m })),
-    version: preset.version,
-  };
-}
-
 /** Replace a preset's mod list with the current state */
 export function replacePreset(
   presets: Preset[],
@@ -53,11 +44,6 @@ export function replacePreset(
 /** Delete a preset by name */
 export function deletePreset(presets: Preset[], name: string): Preset[] {
   return presets.filter((p) => p.name !== name);
-}
-
-/** Check if a preset name already exists */
-export function presetExists(presets: Preset[], name: string): boolean {
-  return presets.some((p) => p.name === name);
 }
 
 // ─── Preset Application ──────────────────────────────────────────────────────
@@ -183,42 +169,5 @@ export function createBisectPresets(
   return {
     firstPreset: { name: `${ts}_${first.length}_First`, mods: first, version: 2 },
     secondPreset: { name: `${ts}_${second.length}_Second`, mods: second, version: 2 },
-  };
-}
-
-// ─── Import/Export ────────────────────────────────────────────────────────────
-
-/** Export a preset to a JSON-serializable format */
-export function exportPreset(preset: Preset): string {
-  const serializable = {
-    name: preset.name,
-    version: preset.version,
-    mods: preset.mods.map((m) => ({
-      name: m.name,
-      workshopId: m.workshopId,
-      isEnabled: m.isEnabled,
-      loadOrder: m.loadOrder,
-      humanName: m.humanName,
-      author: m.author,
-    })),
-  };
-  return JSON.stringify(serializable, null, 2);
-}
-
-/** Import a preset from JSON */
-export function importPreset(json: string): Preset {
-  const data = JSON.parse(json);
-  return {
-    name: data.name ?? "Imported Preset",
-    version: data.version ?? 2,
-    mods: (data.mods ?? []).map((m: any) => ({
-      ...m,
-      tags: m.tags ?? ["mod"],
-      isEnabled: m.isEnabled ?? false,
-      isDeleted: false,
-      isMovie: false,
-      isInData: false,
-      author: m.author ?? "",
-    })),
   };
 }

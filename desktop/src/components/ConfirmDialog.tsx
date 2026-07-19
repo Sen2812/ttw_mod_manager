@@ -34,7 +34,7 @@ const VARIANT_STYLES: Record<
     iconBg: "bg-morandi-danger-light/70",
     iconColor: "text-morandi-danger",
     icon: Trash2,
-    btn: "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 bg-morandi-danger text-white hover:opacity-90 active:scale-[0.97]",
+    btn: "btn-morandi-danger-solid",
   },
   primary: {
     iconBg: "bg-morandi-accent/10",
@@ -81,17 +81,14 @@ export default function ConfirmDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-morandi-text/30 backdrop-blur-sm animate-[fadeIn_150ms_ease-out]"
-        onClick={onCancel}
-      />
-      <div className="relative card-morandi w-[380px] p-6 shadow-morandi-lg">
+      <div className="overlay-scrim" onClick={onCancel} />
+      <div className="relative z-10 card-morandi w-[380px] p-6 shadow-morandi-lg animate-[modalIn_200ms_ease-out]">
         <button
           onClick={onCancel}
-          className="absolute top-3 right-3 p-1 rounded hover:bg-morandi-hover transition-colors"
+          className="absolute top-3 right-3 modal-close-btn"
           aria-label={t("common.close")}
         >
-          <X className="w-4 h-4 text-morandi-text-muted" />
+          <X className="w-4 h-4" />
         </button>
 
         {/* 顶部圆形图标 */}

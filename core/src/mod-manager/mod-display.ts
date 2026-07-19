@@ -26,11 +26,6 @@ export function getModDisplayName(mod: Pick<Mod, "humanName" | "name" | "worksho
   return mod.name.replace(/\.pack$/i, "");
 }
 
-/** Whether the mod has a resolved workshop display title. */
-export function hasWorkshopDisplayName(mod: Pick<Mod, "humanName" | "workshopId">): boolean {
-  return isUsableWorkshopTitle(mod.humanName, mod.workshopId);
-}
-
 /** Apply a workshop title when it passes validation. */
 export function applyWorkshopTitle(mod: Mod, title: string | undefined): boolean {
   if (!isUsableWorkshopTitle(title, mod.workshopId)) return false;

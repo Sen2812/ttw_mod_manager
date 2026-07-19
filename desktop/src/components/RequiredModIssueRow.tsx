@@ -80,8 +80,8 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
           onClick={handleEnable}
           disabled={busy || !issue.matchedModName}
           className={clsx(
-            "flex items-center gap-2 shrink-0 pl-1 pr-2 py-1 rounded-lg transition-colors",
-            "hover:bg-morandi-hover disabled:opacity-50 disabled:cursor-not-allowed",
+            "btn-morandi-subtle shrink-0 !pl-1 !pr-2",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
           )}
         >
           <span className="text-[11px] text-morandi-text-secondary whitespace-nowrap">
@@ -115,11 +115,7 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
           onClick={handleSteamWorkshop}
           disabled={busy || !steamOnline}
           title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
-          className={clsx(
-            "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
-            "bg-morandi-accent-light/50 text-morandi-accent hover:bg-morandi-accent-light transition-colors",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
+          className="btn-morandi-accent-soft"
         >
           {busy
             ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
@@ -144,11 +140,7 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
           onClick={handleSteamWorkshop}
           disabled={busy || !steamOnline}
           title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
-          className={clsx(
-            "flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium",
-            "bg-morandi-warning-light/40 text-morandi-warning hover:bg-morandi-warning-light/60 transition-colors",
-            "disabled:opacity-50 disabled:cursor-not-allowed",
-          )}
+          className="btn-morandi-warning-soft"
         >
           {busy
             ? <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />

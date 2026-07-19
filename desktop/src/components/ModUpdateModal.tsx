@@ -62,10 +62,10 @@ export default function ModUpdateModal() {
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center">
-        <div className="absolute inset-0 bg-morandi-text/30 backdrop-blur-sm" onClick={close} />
-        <div className="relative card-morandi w-[480px] max-w-[95vw] flex flex-col overflow-hidden">
-          <div className="flex items-center gap-3 px-5 py-3.5 border-b border-morandi-border-light shrink-0">
-            <div className="w-9 h-9 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+        <div className="modal-backdrop" onClick={close} />
+        <div className="modal-panel w-[480px] max-w-[95vw] flex flex-col overflow-hidden">
+          <div className="modal-header">
+            <div className="thumb-morandi-sm">
               {mod.imgPath ? (
                 <img src={`file:///${mod.imgPath.replace(/\\/g, '/')}`} className="w-full h-full object-cover" alt="" draggable={false} />
               ) : (
@@ -84,8 +84,8 @@ export default function ModUpdateModal() {
                 {t(`update.status.${status}`)}
               </p>
             </div>
-            <button onClick={close} className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors shrink-0">
-              <X className="w-5 h-5 text-morandi-text-secondary" />
+            <button onClick={close} className="modal-close-btn">
+              <X className="w-5 h-5" />
             </button>
           </div>
 
@@ -93,12 +93,12 @@ export default function ModUpdateModal() {
             <VersionRow label={t("update.localVersion")} value={formatDate(mod.lastChangedLocal)} />
             <VersionRow label={t("update.workshopVersion")} value={formatDate(mod.lastChanged)} />
             {status === "downloading" && (
-              <p className="text-xs text-morandi-text-secondary bg-morandi-accent-light/30 rounded-lg px-3 py-2">
+              <p className="callout-accent">
                 {t("update.status.downloading")}
               </p>
             )}
             {status === "outdated" && (
-              <p className="text-xs text-morandi-text-secondary bg-morandi-warning-light/30 rounded-lg px-3 py-2">
+              <p className="callout-warning">
                 {t("update.outdatedHint")}
               </p>
             )}
@@ -107,7 +107,7 @@ export default function ModUpdateModal() {
             )}
           </div>
 
-          <div className="px-5 py-3 border-t border-morandi-border-light shrink-0 flex items-center justify-between gap-2">
+          <div className="modal-footer flex items-center justify-between gap-2">
             <button onClick={close} className="btn-morandi-ghost text-xs">{t("common.close")}</button>
             {status === "outdated" && (
               <button

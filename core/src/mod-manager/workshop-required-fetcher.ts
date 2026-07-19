@@ -18,10 +18,6 @@ export function setWorkshopRequiredIdsFetcher(next: WorkshopRequiredIdsFetcher |
   fetcher = next;
 }
 
-export function getWorkshopRequiredIdsFetcher(): WorkshopRequiredIdsFetcher | null {
-  return fetcher;
-}
-
 export async function fetchWorkshopRequiredIds(
   ids: string[],
   game: GameDefinition,

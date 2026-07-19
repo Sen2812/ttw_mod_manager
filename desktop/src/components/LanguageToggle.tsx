@@ -12,11 +12,10 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
   const toggle = useI18nStore((s) => s.toggle);
 
   if (compact) {
-    // 紧凑模式：单按钮，显示当前语言缩写
     return (
       <button
         onClick={toggle}
-        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-morandi-text-secondary hover:bg-morandi-hover transition-colors"
+        className="btn-morandi-subtle !flex-none px-2"
         title={locale === "zh" ? t("topbar.switchToEnglish") : t("topbar.switchToChinese")}
       >
         <Languages className="w-3.5 h-3.5" />
@@ -25,25 +24,18 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
     );
   }
 
-  // 分段控件风格：两个选项并排
   return (
-    <div className="inline-flex items-center rounded-lg bg-morandi-sidebar p-0.5">
+    <div className="segment-control">
       <button
         onClick={() => useI18nStore.getState().setLocale("zh")}
-        className={clsx(
-          "px-3 py-1 rounded-md text-xs font-medium transition-all",
-          locale === "zh" ? "bg-morandi-card text-morandi-text shadow-sm" : "text-morandi-text-muted hover:text-morandi-text",
-        )}
+        className={clsx("segment-item", locale === "zh" && "segment-item-active")}
         title={t("topbar.switchToChinese")}
       >
         中文
       </button>
       <button
         onClick={() => useI18nStore.getState().setLocale("en")}
-        className={clsx(
-          "px-3 py-1 rounded-md text-xs font-medium transition-all",
-          locale === "en" ? "bg-morandi-card text-morandi-text shadow-sm" : "text-morandi-text-muted hover:text-morandi-text",
-        )}
+        className={clsx("segment-item", locale === "en" && "segment-item-active")}
         title={t("topbar.switchToEnglish")}
       >
         English

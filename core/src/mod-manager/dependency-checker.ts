@@ -29,12 +29,6 @@ export interface DependencyIssue {
   matchedModName?: string;
 }
 
-export interface ModDependencyReport {
-  modName: string;
-  issues: DependencyIssue[];
-  hasIssues: boolean;
-}
-
 export interface DependencyCheckContext {
   /** All installed mods (enabled + disabled). */
   mods: Mod[];
@@ -129,41 +123,4 @@ export function getModDependencyIssues(mod: Mod, ctx: DependencyCheckContext): D
   }
 
   return issues;
-}
-
-/** Reports for all currently enabled mods that have unsatisfied prerequisites. */
-export function getEnabledModDependencyReports(ctx: DependencyCheckContext): Record<string, ModDependencyReport> {
-  const reports: Record<string, ModDependencyReport> = {};
-  for (const mod of ctx.mods) {
-    if (!mod.isEnabled) continue;
-    const issues = getModDependencyIssues(mod, ctx);
-    if (issues.length === 0) continue;
-    reports[mod.name] = { modName: mod.name, issues, hasIssues: true };
-  }
-  return reports;
-}
-
-/** Installed mod pack names that can be enabled to satisfy prerequisites. */
-export function collectEnableablePrerequisiteModNames(issues: DependencyIssue[]): string[] {
-  const names = new Set<string>();
-  for (const issue of issues) {
-    if (issue.status === "not_enabled" && issue.matchedModName) {
-      names.add(issue.matchedModName);
-    }
-  }
-  return [...names];
-}
-
-/** Union of enableable prerequisites across multiple mod reports. */
-export function collectAllEnableablePrerequisites(
-  reports: Record<string, ModDependencyReport> | ModDependencyReport[],
-): string[] {
-  const names = new Set<string>();
-  const list = Array.isArray(reports) ? reports : Object.values(reports);
-  for (const report of list) {
-    for (const name of collectEnableablePrerequisiteModNames(report.issues)) {
-      names.add(name);
-    }
-  }
-  return [...names];
 }

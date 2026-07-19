@@ -785,6 +785,15 @@ function registerIpc() {
       outdatedCount: countOutdatedMods(mm.getMods()),
     };
   });
+  ipcMain.handle("fetch-workshop-titles", async (_e, workshopIds: string[]) => {
+    await ensureInit();
+    if (!Array.isArray(workshopIds) || workshopIds.length === 0) {
+      return { ok: true, applied: 0, mods: mm.getMods() };
+    }
+    const applied = await mm.fetchWorkshopTitles(workshopIds);
+    if (applied > 0) notifyModsUpdated();
+    return { ok: true, applied, mods: mm.getMods() };
+  });
   ipcMain.handle("trigger-workshop-download", async (_e, workshopId: string) => {
     await ensureInit();
     const appId = getCurrentSteamAppId();
@@ -877,8 +886,9 @@ function registerIpc() {
 
   // 读取所有启用 mod 的 pack 内部文件索引，按加载顺序检测文件覆盖关系。
   // 每次勾选/取消都会触发，因此使用缓存让重复调用几乎是零成本。
-  ipcMain.handle("analyze-overwrites", async () => {
+  ipcMain.handle("analyze-overwrites", async (_e, opts?: { statsOnly?: boolean }) => {
     await ensureInit();
+    const statsOnly = opts?.statsOnly === true;
     const enabledMods = mm.getEnabledMods();
     if (enabledMods.length === 0) {
       return { conflicts: [], modStats: {}, modsWithConflicts: 0, totalConflicts: 0 };
@@ -898,15 +908,14 @@ function registerIpc() {
         loadOrder: m.loadOrder ?? i,
       })),
       indices,
-      { modPathByName },
+      { modPathByName, includeConflicts: !statsOnly },
     );
 
-    // 序列化 Map -> Record（IPC 不能传输 Map）
     const modStatsObj: Record<string, any> = {};
     for (const [k, v] of analysis.modStats) modStatsObj[k] = v;
 
     return {
-      conflicts: analysis.conflicts,
+      conflicts: statsOnly ? [] : analysis.conflicts,
       modStats: modStatsObj,
       modsWithConflicts: analysis.modsWithConflicts,
       totalConflicts: analysis.totalConflicts,
@@ -983,16 +992,6 @@ function registerIpc() {
       return { error: e.message };
     }
   });
-  ipcMain.handle("update-preset", async (_e, n: string) => {
-    await ensureInit();
-    try {
-      mm.replacePreset(n);
-      return mm.getPresets();
-    } catch (e: any) {
-      return { error: e.message };
-    }
-  });
-
   ipcMain.handle("export-profile-order", async (_e, profileName: string, mods?: Mod[]) => {
     await ensureInit();
     if (mods?.length) syncModsFromRenderer(mods);

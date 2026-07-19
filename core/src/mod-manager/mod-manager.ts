@@ -11,6 +11,7 @@ import { GameDefinition, GameFolderPaths, Mod, Preset, SupportedGame } from "../
 import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
 import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, type ScanModsOptions } from "./mod-discovery";
+import { fetchWorkshopTitlesForIds } from "./workshop-title-fetch";
 import {
   countOutdatedMods,
   isModOutdated,
@@ -18,13 +19,12 @@ import {
 import {
   sortByLoadOrder,
   getEnabledModsInLoadOrder,
-  filterMods,
   deduplicateDataContent,
   adjustDuplicateLoadOrders,
   compareModNames,
 } from "./mod-sorting";
 import {
-  seedModCategoryFromTags,
+  normalizeModTagFields,
 } from "./category-utils";
 import {
   createPreset,
@@ -224,7 +224,7 @@ export class ModManager {
     // Sort by load order
     this.mods = sortByLoadOrder(this.mods);
 
-    for (const mod of this.mods) seedModCategoryFromTags(mod);
+    for (const mod of this.mods) normalizeModTagFields(mod);
 
     this.log(`Loaded ${this.mods.length} mods (${this.mods.filter((m) => m.isEnabled).length} enabled)`);
     return this.mods;
@@ -241,7 +241,22 @@ export class ModManager {
       this.log,
     );
     this.mods = sortByLoadOrder(this.mods);
-    for (const mod of this.mods) seedModCategoryFromTags(mod);
+    for (const mod of this.mods) normalizeModTagFields(mod);
+  }
+
+  /** Fetch workshop HTML titles for specific item IDs (on-demand, concurrent). */
+  async fetchWorkshopTitles(workshopIds: string[]): Promise<number> {
+    if (!this.configDir || workshopIds.length === 0) return 0;
+    const applied = await fetchWorkshopTitlesForIds(
+      this.mods,
+      workshopIds,
+      this.configDir,
+      this.log,
+    );
+    if (applied > 0) {
+      this.mods = sortByLoadOrder(this.mods);
+    }
+    return applied;
   }
 
   /** Load presets and restore the current preset state */
@@ -393,7 +408,7 @@ export class ModManager {
     }
 
     this.activePresetName = name;
-    this.saveCurrentPreset();
+    this.syncSessionPreset();
     this.log(`Applied preset: ${name} (${operation})`);
   }
 
@@ -502,11 +517,6 @@ export class ModManager {
     return getEnabledModsInLoadOrder(this.mods);
   }
 
-  /** Get mods sorted and filtered */
-  getFilteredMods(filter: string, includeAuthor = false): Mod[] {
-    return filterMods(this.mods, filter, includeAuthor);
-  }
-
   /** Fetch workshop prerequisites for one mod and merge into the mod list. */
   async ensureModPrerequisites(modName: string): Promise<void> {
     if (!this.currentGame) return;
@@ -562,36 +572,12 @@ export class ModManager {
     
     return missing;
   }
-  
-  /** Get dependency status for all mods */
-  getDependencyStatus(): { mod: string; missing: string[] }[] {
-    const result: { mod: string; missing: string[] }[] = [];
-    
-    for (const mod of this.mods) {
-      if (mod.isEnabled) {
-        const missing = this.checkDependencies(mod);
-        if (missing.length > 0) {
-          result.push({ mod: mod.name, missing });
-        }
-      }
-    }
-    
-    return result;
-  }
 
   /** Disable a specific mod */
   disableMod(modName: string): void {
     const mod = this.mods.find((m) => m.name === modName);
     if (mod) {
       mod.isEnabled = false;
-    }
-  }
-
-  /** Enable mods by name list */
-  enableModsByName(names: string[]): void {
-    const nameSet = new Set(names);
-    for (const mod of this.mods) {
-      mod.isEnabled = nameSet.has(mod.name);
     }
   }
 
@@ -623,15 +609,6 @@ export class ModManager {
     mod.loadOrder = loadOrder;
     adjustDuplicateLoadOrders(this.mods, mod);
     this.mods = sortByLoadOrder(this.mods);
-  }
-  setAlwaysEnabledMods(modNames: string[]): void {
-    this.config.alwaysEnabledMods = modNames.map((name) => ({ name }));
-    const nameSet = new Set(modNames);
-    for (const mod of this.mods) {
-      if (nameSet.has(mod.name)) mod.isEnabled = true;
-    }
-    this.saveCurrentPreset();
-    this.saveConfig();
   }
 
   // ─── Workshop Updates ───────────────────────────────────────────────────
@@ -750,6 +727,16 @@ export class ModManager {
   }
 
   // ─── Internal Helpers ───────────────────────────────────────────────────
+
+  /** Persist which preset is active and its session snapshot (load-only switch). */
+  private syncSessionPreset(): void {
+    this.config.gameCurrentPreset[this.config.currentGame] = {
+      name: this.activePresetName || "Default",
+      mods: this.mods.map((m) => ({ ...m })),
+      version: 2,
+    };
+    this.saveConfig().catch(err => this.log(`Failed to save config: ${err}`));
+  }
 
   /** Save the current mod state to the active preset */
   saveCurrentPreset(): void {

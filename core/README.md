@@ -49,7 +49,7 @@ npx ts-node src/cli.ts info
 ```
 core/src/
 ├── types/                  # 类型定义
-│   ├── mod.ts              # Mod, Preset, ModData
+│   ├── mod.ts              # Mod, Preset
 │   ├── game.ts             # GameDefinition, SupportedGame
 │   ├── pack.ts             # Pack, PackedFile, SchemaField
 │   └── compat.ts           # 碰撞检测类型
@@ -71,8 +71,8 @@ core/src/
 ├── config/                 # 配置持久化
 │   └── config-manager.ts   # 去抖写入、原子保存
 │
-├── compat/                 # 兼容性检测
-│   └── collision-detector.ts
+├── compat/                 # 文件级覆盖分析
+│   └── overwrite-detector.ts
 │
 └── cli.ts                  # CLI 入口 (可直接运行)
 ```
@@ -117,7 +117,7 @@ await mm.setGame("wh2");
 | **排序/过滤** | 12 种排序策略 + 正则过滤 |
 | **预设管理** | 创建/应用/删除/更新预设，支持二分调试 |
 | **配置持久化** | 去抖写入、原子保存、备份 |
-| **碰撞检测** | 文件级和表级冲突检测 |
+| **覆盖分析** | 启用 mod 间文件覆盖检测 |
 | **多游戏支持** | 9 款全战游戏，可通过注册表扩展 |
 
 ## 从原项目提取的代码量
@@ -131,6 +131,6 @@ await mm.setGame("wh2");
 | `appConfigFunctions.ts` | ~150 行 | `config-manager.ts` |
 | `modFunctions.ts` (discovery) | ~200 行 | `mod-discovery.ts` |
 | `packFileHandler.ts` | ~50 行 | `pack-header-reader.ts` |
-| `modCompat/` | ~100 行 | `collision-detector.ts` |
+| `modCompat/` | ~100 行 | `overwrite-detector.ts` |
 | **新增** (CLI + ModManager) | ~800 行 | `cli.ts` + `mod-manager.ts` |
 | **总计** | ~2876 行 | |

@@ -1,4 +1,3 @@
-export { detectFileCollisions, detectTableCollisions, findOverwrittenVanillaFiles } from "./collision-detector";
 export {
   detectOverwrites,
 } from "./overwrite-detector";

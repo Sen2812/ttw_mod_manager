@@ -26,7 +26,6 @@ export function getModWorkshopTags(mod: Pick<Mod, "tags">): string[] {
 /** Normalize workshop tags and drop legacy user category fields. */
 export function normalizeModTagFields(mod: Mod): void {
   mod.tags = normalizeWorkshopTags(mod.tags);
-  delete mod.categories;
 }
 
 /** Collect workshop tags across mods (e.g. for filters). */
@@ -36,14 +35,4 @@ export function collectWorkshopTagsFromMods(mods: Mod[]): string[] {
     for (const t of getModWorkshopTags(mod)) set.add(t);
   }
   return [...set].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-}
-
-/** @deprecated Use normalizeModTagFields */
-export function seedModCategoryFromTags(mod: Mod): void {
-  normalizeModTagFields(mod);
-}
-
-/** @deprecated Use collectWorkshopTagsFromMods */
-export function collectCategoriesFromMods(mods: Mod[]): string[] {
-  return collectWorkshopTagsFromMods(mods);
 }

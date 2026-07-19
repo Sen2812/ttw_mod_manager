@@ -5,6 +5,7 @@ import { X, Loader2, Package } from "lucide-react";
 import clsx from "clsx";
 import type { FileConflict, Mod, ModRelation } from "../types";
 import { getModDisplayName } from "@core/mod-manager/mod-display";
+import { enabledModsSignature } from "../utils/enabled-mods-signature";
 
 const CATEGORY_COLORS: Record<FileConflict["category"], string> = {
   db: "text-morandi-accent",
@@ -29,6 +30,7 @@ export default function CompatPanel() {
   const closeCompatPanel = useStore(s => s.closeCompatPanel);
   const focusMod = useStore(s => s.compatFocusMod);
   const analysis = useStore(s => s.overwriteAnalysis);
+  const overwriteAnalysisKey = useStore(s => s.overwriteAnalysisKey);
   const stats = useStore(s => focusMod ? s.overwriteStats?.[focusMod] : undefined);
   const mods = useStore(s => s.mods);
   const refreshOverwriteStats = useStore(s => s.refreshOverwriteStats);
@@ -44,11 +46,11 @@ export default function CompatPanel() {
   }, [showCompatPanel, focusMod, closeCompatPanel]);
 
   useEffect(() => {
-    if (showCompatPanel && focusMod) {
-      setIsLoading(true);
-      refreshOverwriteStats({ full: true }).finally(() => setIsLoading(false));
-    }
-  }, [showCompatPanel, focusMod, refreshOverwriteStats]);
+    if (!showCompatPanel || !focusMod) return;
+    if (analysis && overwriteAnalysisKey === enabledModsSignature(mods)) return;
+    setIsLoading(true);
+    refreshOverwriteStats({ full: true }).finally(() => setIsLoading(false));
+  }, [showCompatPanel, focusMod, analysis, overwriteAnalysisKey, mods, refreshOverwriteStats]);
 
   const { winFiles, lossFiles } = useMemo(() => {
     if (!analysis || !focusMod) return { winFiles: [], lossFiles: [] };
@@ -81,10 +83,10 @@ export default function CompatPanel() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-morandi-text/30 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative card-morandi w-[640px] max-w-[95vw] max-h-[78vh] flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-morandi-border-light shrink-0">
-          <div className="w-9 h-9 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+      <div className="modal-backdrop" onClick={handleClose} />
+      <div className="modal-panel w-[640px] max-w-[95vw] max-h-[78vh] flex flex-col overflow-hidden">
+        <div className="modal-header">
+          <div className="thumb-morandi-sm">
             {mod?.imgPath ? (
               <img src={`file:///${mod.imgPath.replace(/\\/g, "/")}`} className="w-full h-full object-cover" alt="" draggable={false} />
             ) : (
@@ -95,8 +97,8 @@ export default function CompatPanel() {
             <h2 className="text-base font-semibold text-morandi-text truncate">{displayName}</h2>
             <p className="text-xs text-morandi-text-muted mt-0.5">{summaryText}</p>
           </div>
-          <button type="button" onClick={handleClose} className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors shrink-0" title={t("common.close")}>
-            <X className="w-5 h-5 text-morandi-text-secondary" />
+          <button type="button" onClick={handleClose} className="modal-close-btn" title={t("common.close")}>
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -163,10 +165,7 @@ function ConflictSection({
   return (
     <section>
       <div className={clsx(
-        "px-4 py-2 border-b",
-        accent === "win"
-          ? "bg-morandi-success/8 text-morandi-success border-morandi-success/20"
-          : "bg-morandi-danger/8 text-morandi-danger border-morandi-danger/20",
+        accent === "win" ? "banner-success" : "banner-danger",
       )}>
         <div className="text-xs font-medium">{title}</div>
         <div className="text-[10px] opacity-80 mt-0.5">{subtitle}</div>

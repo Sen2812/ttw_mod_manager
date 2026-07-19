@@ -68,9 +68,6 @@ export interface GameDefinition {
   readonly supportedOptions: string[];
 }
 
-/** Game folder paths per game */
-export type GameFolderPathsMap = Record<SupportedGame, GameFolderPaths>;
-
 import { Preset } from "./mod";
 
 /** Preset storage per game */
