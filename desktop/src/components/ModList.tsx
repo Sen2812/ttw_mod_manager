@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, memo, type ReactNode } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef, memo, type ReactNode, type RefObject } from "react";
 import {
   DndContext, closestCenter, KeyboardSensor, MouseSensor, useSensor, useSensors,
   DragEndEvent, DragOverlay, DragStartEvent, useDroppable,
@@ -10,7 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "../store";
 import { useT } from "../i18n";
 import {
-  GripVertical, Package, Info, ArrowDown, ArrowUp, ArrowUpToLine, ArrowDownToLine,
+  GripVertical, Package, Info, ArrowDown, ArrowUp,
   AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput, X, Plus,
 } from "lucide-react";
 import clsx from "clsx";
@@ -18,6 +18,8 @@ import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
 import ModListFiltersBar from "./ModListFiltersBar";
 import ModRowTags from "./ModRowTags";
+import { useModListVirtualizer, VirtualModRows } from "./VirtualModRows";
+import { useWorkshopTitlePrefetch } from "../hooks/useWorkshopTitlePrefetch";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModWorkshopTags } from "@core/mod-manager/category-utils";
 import { getModDisplayName, getModSourceType } from "@core/mod-manager/mod-display";
@@ -27,7 +29,6 @@ import {
   getEnabledModNames,
   insertEnabledModInOrder,
   reorderEnabledModByStep,
-  reorderEnabledModToEdge,
 } from "../utils/load-order";
 import {
   DEFAULT_MOD_LIST_FILTERS,
@@ -82,9 +83,11 @@ function isAwaitingDownloadOnly(mod: Mod): boolean {
 
 interface ModRowActionsProps {
   mod: Mod;
+  allMods: Mod[];
   inProfile: boolean;
   dependencyIssueCount: number;
   hasUpdate: boolean;
+  overwriteStats?: ModConflictStats;
   onShowCompat: (modName: string) => void;
   onShowDependency: (modName: string) => void;
   onShowUpdate: (modName: string) => void;
@@ -92,34 +95,32 @@ interface ModRowActionsProps {
 }
 
 function ModRowActions({
-  mod, inProfile, dependencyIssueCount, hasUpdate,
+  mod, allMods, inProfile, dependencyIssueCount, hasUpdate, overwriteStats,
   onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
 }: ModRowActionsProps) {
   const t = useT();
-  const allMods = useStore(s => s.mods);
-  const stats = useStore(s => inProfile ? s.overwriteStats?.[mod.name] : undefined);
   const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
 
   return (
-    <div className="flex items-center gap-0.5 shrink-0">
+    <div className="flex items-center gap-1 shrink-0">
       {mod.pendingDownload && (
         <button
           onClick={(e) => { e.stopPropagation(); onRequestDownload(mod); }}
-          className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
+          className="icon-btn-accent"
           title={t("modlist.requestDownloadTooltip")}
         >
           <DownloadCloud className="w-4 h-4" />
         </button>
       )}
       {isCheckingPrerequisites && !mod.pendingDownload && (
-        <span className="p-1 text-morandi-accent" title={t("dependency.checking")}>
+        <span className="icon-btn-accent pointer-events-none" title={t("dependency.checking")}>
           <Loader2 className="w-4 h-4 animate-spin" />
         </span>
       )}
       {hasUpdate && (
         <button
           onClick={(e) => { e.stopPropagation(); onShowUpdate(mod.name); }}
-          className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
+          className="icon-btn-accent"
           title={t("modlist.updateTooltip")}
         >
           <DownloadCloud className="w-4 h-4" />
@@ -128,27 +129,23 @@ function ModRowActions({
       {inProfile && dependencyIssueCount > 0 && (
         <button
           onClick={(e) => { e.stopPropagation(); onShowDependency(mod.name); }}
-          className="p-1 rounded-md text-morandi-warning hover:bg-morandi-warning-light/40 transition-colors"
+          className="icon-btn-warning"
           title={t("modlist.dependencyTooltip", { n: dependencyIssueCount })}
         >
           <AlertTriangle className="w-4 h-4" />
         </button>
       )}
-      {inProfile && stats && (stats.wins > 0 || stats.losses > 0) && (
+      {inProfile && overwriteStats && (overwriteStats.wins > 0 || overwriteStats.losses > 0) && (
         <button
           onClick={(e) => { e.stopPropagation(); onShowCompat(mod.name); }}
-          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-morandi-sidebar/60 hover:bg-morandi-hover transition-colors"
-          title={buildOverwriteTooltip(t, stats, allMods)}
+          className="chip-neutral gap-1"
+          title={buildOverwriteTooltip(t, overwriteStats, allMods)}
         >
-          {stats.wins > 0 && (
-            <span className="text-[10px] font-medium text-morandi-success leading-none px-1 py-0.5 rounded bg-morandi-success/10">
-              {t("modlist.overwriteActiveShort", { n: stats.wins })}
-            </span>
+          {overwriteStats.wins > 0 && (
+            <span className="chip-success">{t("modlist.overwriteActiveShort", { n: overwriteStats.wins })}</span>
           )}
-          {stats.losses > 0 && (
-            <span className="text-[10px] font-medium text-morandi-danger leading-none px-1 py-0.5 rounded bg-morandi-danger/10">
-              {t("modlist.overwriteOverriddenShort", { n: stats.losses })}
-            </span>
+          {overwriteStats.losses > 0 && (
+            <span className="chip-danger">{t("modlist.overwriteOverriddenShort", { n: overwriteStats.losses })}</span>
           )}
         </button>
       )}
@@ -167,7 +164,7 @@ function ModRowMeta({ mod, emphasized }: ModRowMetaProps) {
 
   return (
     <>
-      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+      <div className="thumb-morandi">
         {mod.imgPath ? (
           <img
             src={`file:///${mod.imgPath.replace(/\\/g, "/")}`}
@@ -201,6 +198,7 @@ function ModRowMeta({ mod, emphasized }: ModRowMetaProps) {
 
 interface CatalogModRowProps {
   mod: Mod;
+  allMods: Mod[];
   onAddToProfile: (mod: Mod) => void;
   onShowDetail: (mod: Mod) => void;
   onShowCompat: (modName: string) => void;
@@ -212,7 +210,7 @@ interface CatalogModRowProps {
 }
 
 const CatalogModRow = memo(function CatalogModRow({
-  mod, onAddToProfile, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
+  mod, allMods, onAddToProfile, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
   dependencyIssueCount, hasUpdate,
 }: CatalogModRowProps) {
   const t = useT();
@@ -223,29 +221,17 @@ const CatalogModRow = memo(function CatalogModRow({
     <div
       data-catalog-mod-name={mod.name}
       className={clsx(
-        "group flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50",
-        mod.isEnabled ? "bg-morandi-page/30" : "bg-morandi-page/50",
+        "group list-row-catalog",
+        mod.isEnabled && "opacity-80",
         awaitingDownloadOnly && "opacity-70",
       )}
       onDoubleClick={() => onShowDetail(mod)}
     >
-      {canAdd ? (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onAddToProfile(mod); }}
-          className="flex items-center justify-center w-7 h-7 shrink-0 self-start rounded-md bg-morandi-accent/15 text-morandi-accent border border-morandi-accent/25 hover:bg-morandi-accent hover:text-white hover:border-morandi-accent transition-colors"
-          title={t("modlist.addToProfileHint")}
-          aria-label={t("modlist.addToProfile")}
-        >
-          <Plus className="w-4 h-4" strokeWidth={2.5} />
-        </button>
-      ) : (
-        <div className="w-7 shrink-0 self-start" title={t("modlist.downloadingTooltip")} aria-label={t("modlist.downloadingTooltip")} />
-      )}
       <ModRowMeta mod={mod} />
       <div className="shrink-0 self-start mt-1">
         <ModRowActions
           mod={mod}
+          allMods={allMods}
           inProfile={false}
           dependencyIssueCount={dependencyIssueCount}
           hasUpdate={hasUpdate}
@@ -257,17 +243,32 @@ const CatalogModRow = memo(function CatalogModRow({
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onShowDetail(mod); }}
-        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0 self-start mt-0.5"
+        className="icon-btn shrink-0 self-start mt-0.5"
         title={t("modlist.viewDetails")}
       >
-        <Info className="w-4 h-4 text-morandi-text-muted" />
+        <Info className="w-4 h-4" />
       </button>
+      {canAdd ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAddToProfile(mod); }}
+          className="icon-btn-accent-solid shrink-0 self-start"
+          title={t("modlist.addToProfileHint")}
+          aria-label={t("modlist.addToProfile")}
+        >
+          <Plus className="w-4 h-4" strokeWidth={2.5} />
+        </button>
+      ) : (
+        <div className="w-7 shrink-0 self-start" title={t("modlist.downloadingTooltip")} aria-label={t("modlist.downloadingTooltip")} />
+      )}
     </div>
   );
 });
 
 interface ProfileModRowProps {
   mod: Mod;
+  allMods: Mod[];
+  overwriteStats?: ModConflictStats;
   onShowDetail: (mod: Mod) => void;
   onShowCompat: (modName: string) => void;
   onShowDependency: (modName: string) => void;
@@ -276,8 +277,6 @@ interface ProfileModRowProps {
   onRemove: (mod: Mod) => void;
   onMoveUp: (mod: Mod) => void;
   onMoveDown: (mod: Mod) => void;
-  onMoveToTop: (mod: Mod) => void;
-  onMoveToBottom: (mod: Mod) => void;
   dependencyIssueCount: number;
   hasUpdate: boolean;
   isAtListTop: boolean;
@@ -285,8 +284,8 @@ interface ProfileModRowProps {
 }
 
 const ProfileModRow = memo(function ProfileModRow({
-  mod, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, onRemove,
-  onMoveUp, onMoveDown, onMoveToTop, onMoveToBottom,
+  mod, allMods, overwriteStats, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, onRemove,
+  onMoveUp, onMoveDown,
   dependencyIssueCount, hasUpdate,
   isAtListTop, isAtListBottom,
 }: ProfileModRowProps) {
@@ -304,9 +303,9 @@ const ProfileModRow = memo(function ProfileModRow({
       style={style}
       data-profile-mod-name={mod.name}
       className={clsx(
-        "group flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50 bg-morandi-card",
+        "group list-row-profile",
         isDragging && "opacity-50",
-        isCheckingPrerequisites && "bg-morandi-accent-light/15",
+        isCheckingPrerequisites && "list-row-highlight",
       )}
       onDoubleClick={() => onShowDetail(mod)}
     >
@@ -314,69 +313,51 @@ const ProfileModRow = memo(function ProfileModRow({
         <div
           {...attributes}
           {...listeners}
-          className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none"
+          className="drag-handle"
           title={t("modlist.dragReorderHint")}
           aria-label={t("modlist.dragReorderHint")}
         >
-          <GripVertical className="w-4 h-4 text-morandi-text-muted" />
+          <GripVertical className="w-4 h-4 text-morandi-text-secondary" />
         </div>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onMoveUp(mod); }}
           disabled={isAtListTop}
-          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="icon-btn-bordered"
           title={t("modlist.moveUpHint")}
           aria-label={t("modlist.moveUp")}
         >
-          <ArrowUp className="w-3.5 h-3.5 text-morandi-text-muted" />
+          <ArrowUp className="w-3.5 h-3.5" strokeWidth={2.25} />
         </button>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onMoveDown(mod); }}
           disabled={isAtListBottom}
-          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
+          className="icon-btn-bordered"
           title={t("modlist.moveDownHint")}
           aria-label={t("modlist.moveDown")}
         >
-          <ArrowDown className="w-3.5 h-3.5 text-morandi-text-muted" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onMoveToTop(mod); }}
-          disabled={isAtListTop}
-          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
-          title={t("modlist.moveToTopHint")}
-          aria-label={t("modlist.moveToTop")}
-        >
-          <ArrowUpToLine className="w-3.5 h-3.5 text-morandi-text-muted" />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onMoveToBottom(mod); }}
-          disabled={isAtListBottom}
-          className="p-1 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-30 disabled:cursor-not-allowed"
-          title={t("modlist.moveToBottomHint")}
-          aria-label={t("modlist.moveToBottom")}
-        >
-          <ArrowDownToLine className="w-3.5 h-3.5 text-morandi-text-muted" />
+          <ArrowDown className="w-3.5 h-3.5" strokeWidth={2.25} />
         </button>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRemove(mod); }}
-          className="p-1 rounded hover:bg-morandi-danger-light transition-colors opacity-0 group-hover:opacity-100"
+          className="icon-btn-danger"
           title={t("modlist.removeFromProfileHint")}
           aria-label={t("modlist.removeFromProfile")}
         >
-          <X className="w-3.5 h-3.5 text-morandi-danger" />
+          <X className="w-3.5 h-3.5" strokeWidth={2.25} />
         </button>
       </div>
       <ModRowMeta mod={mod} emphasized />
       <div className="shrink-0 self-start mt-1">
         <ModRowActions
           mod={mod}
+          allMods={allMods}
           inProfile
           dependencyIssueCount={dependencyIssueCount}
           hasUpdate={hasUpdate}
+          overwriteStats={overwriteStats}
           onShowCompat={onShowCompat}
           onShowDependency={onShowDependency}
           onShowUpdate={onShowUpdate}
@@ -385,10 +366,10 @@ const ProfileModRow = memo(function ProfileModRow({
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onShowDetail(mod); }}
-        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0 self-start mt-0.5"
+        className="icon-btn shrink-0 self-start mt-0.5"
         title={t("modlist.viewDetails")}
       >
-        <Info className="w-4 h-4 text-morandi-text-muted" />
+        <Info className="w-4 h-4" />
       </button>
     </div>
   );
@@ -410,6 +391,7 @@ function ModPanel({
   headerExtra,
   dropId,
   isOverClass,
+  scrollRef,
   children,
   empty,
 }: {
@@ -419,14 +401,21 @@ function ModPanel({
   headerExtra?: ReactNode;
   dropId: string;
   isOverClass?: string;
+  scrollRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
   empty?: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: dropId });
+  const mergedScrollRef = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    if (scrollRef) {
+      (scrollRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+    }
+  }, [setNodeRef, scrollRef]);
 
   return (
     <div className="flex-1 min-w-0 flex flex-col border-r border-morandi-border-light last:border-r-0">
-      <div className="px-4 py-3 border-b border-morandi-border-light bg-morandi-sidebar/40">
+      <div className="panel-header">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-morandi-text truncate" title={titleHint}>{title}</h3>
@@ -436,7 +425,7 @@ function ModPanel({
         {headerExtra}
       </div>
       <div
-        ref={setNodeRef}
+        ref={mergedScrollRef}
         className={clsx(
           "flex-1 overflow-y-auto min-h-0 transition-colors",
           isOver && isOverClass,
@@ -462,6 +451,9 @@ export default function ModList() {
   const isCheckingUpdates = useStore(s => s.isCheckingUpdates);
   const setIsCheckingUpdates = useStore(s => s.setIsCheckingUpdates);
   const refreshOverwriteStats = useStore(s => s.refreshOverwriteStats);
+  const overwriteStatsMap = useStore(s => s.overwriteStats);
+  const activePresetName = useStore(s => s.activePresetName);
+  const profileSwitching = useStore(s => s.profileSwitching);
   const tagLabel = useWorkshopTagLabel();
 
   const [modFilters, setModFilters] = useState<ModListFilterState>(DEFAULT_MOD_LIST_FILTERS);
@@ -696,14 +688,6 @@ export default function ModList() {
     void applyProfileOrder(reorderEnabledModByStep(mods, mod.name, "down"), { modName: mod.name });
   }, [mods, applyProfileOrder]);
 
-  const handleMoveToTop = useCallback((mod: Mod) => {
-    void applyProfileOrder(reorderEnabledModToEdge(mods, mod.name, "top"), { modName: mod.name, block: "start" });
-  }, [mods, applyProfileOrder]);
-
-  const handleMoveToBottom = useCallback((mod: Mod) => {
-    void applyProfileOrder(reorderEnabledModToEdge(mods, mod.name, "bottom"), { modName: mod.name, block: "end" });
-  }, [mods, applyProfileOrder]);
-
   const handleDragStart = useCallback((e: DragStartEvent) => {
     setActiveDragId(String(e.active.id));
   }, []);
@@ -750,7 +734,7 @@ export default function ModList() {
   );
   useEffect(() => {
     if (!enabledSignature) return;
-    const handle = setTimeout(() => { refreshOverwriteStats(); }, 250);
+    const handle = setTimeout(() => { refreshOverwriteStats(); }, 500);
     return () => clearTimeout(handle);
   }, [enabledSignature, refreshOverwriteStats]);
 
@@ -762,9 +746,28 @@ export default function ModList() {
     onRequestDownload: handleRequestDownload,
   };
 
+  const catalogScrollRef = useRef<HTMLDivElement>(null);
+  const profileScrollRef = useRef<HTMLDivElement>(null);
+  const catalogVirtualizer = useModListVirtualizer(catalogMods.length, catalogScrollRef);
+  const profileVirtualizer = useModListVirtualizer(profileMods.length, profileScrollRef);
+  const { queueVisibleRange } = useWorkshopTitlePrefetch(mods);
+
+  const handleCatalogVisibleRange = useCallback((start: number, end: number) => {
+    queueVisibleRange(catalogMods, start, end);
+  }, [catalogMods, queueVisibleRange]);
+
+  const handleProfileVisibleRange = useCallback((start: number, end: number) => {
+    queueVisibleRange(profileMods, start, end);
+  }, [profileMods, queueVisibleRange]);
+
+  useEffect(() => {
+    catalogScrollRef.current?.scrollTo({ top: 0 });
+    profileScrollRef.current?.scrollTo({ top: 0 });
+  }, [activePresetName]);
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-morandi-border-light bg-morandi-card flex items-center gap-3">
+    <div className="flex-1 flex flex-col overflow-hidden relative">
+      <div className="panel-toolbar">
         <button
           onClick={handleImportLocal}
           disabled={isScanning}
@@ -802,7 +805,7 @@ export default function ModList() {
         <div className="ml-auto shrink-0">
           <button
             type="button"
-            className="p-1 rounded-md text-morandi-accent/80 hover:bg-morandi-hover transition-colors"
+            className="icon-btn-accent"
             title={t("modlist.loadOrderHint")}
             aria-label={t("modlist.loadOrderHint")}
           >
@@ -812,7 +815,7 @@ export default function ModList() {
       </div>
 
       {importMessage && (
-        <div className="px-4 py-1.5 text-xs text-morandi-accent bg-morandi-accent/5 border-b border-morandi-border-light">
+        <div className="banner-info">
           {importMessage}
         </div>
       )}
@@ -828,7 +831,8 @@ export default function ModList() {
             title={t("modlist.panelDisabledMods")}
             titleHint={t("modlist.catalogPanelHint")}
             dropId="catalog-panel"
-            isOverClass="bg-morandi-danger/5"
+            isOverClass="drop-zone-danger"
+            scrollRef={catalogScrollRef}
             headerExtra={(
               <ModListFiltersBar
                 filters={modFilters}
@@ -849,44 +853,60 @@ export default function ModList() {
               </div>
             ) : undefined}
           >
-            {!isScanning && catalogMods.map(mod => (
-              <CatalogModRow
-                key={mod.name}
-                mod={mod}
-                onAddToProfile={handleAddFromCatalog}
-                {...sharedRowProps}
-                dependencyIssueCount={0}
-                hasUpdate={!!outdatedByName[mod.name]}
+            {!isScanning && catalogMods.length > 0 && (
+              <VirtualModRows
+                virtualizer={catalogVirtualizer}
+                items={catalogMods}
+                getItemKey={(mod) => mod.name}
+                onVisibleRangeChange={handleCatalogVisibleRange}
+                renderItem={(mod) => (
+                  <CatalogModRow
+                    mod={mod}
+                    allMods={mods}
+                    onAddToProfile={handleAddFromCatalog}
+                    {...sharedRowProps}
+                    dependencyIssueCount={0}
+                    hasUpdate={!!outdatedByName[mod.name]}
+                  />
+                )}
               />
-            ))}
+            )}
           </ModPanel>
 
           <ModPanel
             title={t("modlist.panelEnabledMods")}
             titleHint={t("modlist.profilePanelHint")}
             dropId="profile-panel"
-            isOverClass="bg-morandi-accent/5"
+            isOverClass="drop-zone-accent"
+            scrollRef={profileScrollRef}
             empty={isScanning ? null : profileMods.length === 0 ? (
               <div className="h-full" />
             ) : undefined}
           >
             <SortableContext items={profileMods.map(m => profileId(m.name))} strategy={verticalListSortingStrategy}>
-              {profileMods.map(mod => (
-                <ProfileModRow
-                  key={mod.name}
-                  mod={mod}
-                  {...sharedRowProps}
-                  onRemove={removeModFromProfile}
-                  onMoveUp={handleMoveUp}
-                  onMoveDown={handleMoveDown}
-                  onMoveToTop={handleMoveToTop}
-                  onMoveToBottom={handleMoveToBottom}
-                  dependencyIssueCount={dependencyIssueCounts[mod.name] ?? 0}
-                  hasUpdate={!!outdatedByName[mod.name]}
-                  isAtListTop={mod.name === listEdgeByName.top}
-                  isAtListBottom={mod.name === listEdgeByName.bottom}
+              {profileMods.length > 0 && (
+                <VirtualModRows
+                  virtualizer={profileVirtualizer}
+                  items={profileMods}
+                  getItemKey={(mod) => mod.name}
+                  onVisibleRangeChange={handleProfileVisibleRange}
+                  renderItem={(mod) => (
+                    <ProfileModRow
+                      mod={mod}
+                      allMods={mods}
+                      overwriteStats={overwriteStatsMap?.[mod.name]}
+                      {...sharedRowProps}
+                      onRemove={removeModFromProfile}
+                      onMoveUp={handleMoveUp}
+                      onMoveDown={handleMoveDown}
+                      dependencyIssueCount={dependencyIssueCounts[mod.name] ?? 0}
+                      hasUpdate={!!outdatedByName[mod.name]}
+                      isAtListTop={mod.name === listEdgeByName.top}
+                      isAtListBottom={mod.name === listEdgeByName.bottom}
+                    />
+                  )}
                 />
-              ))}
+              )}
             </SortableContext>
           </ModPanel>
         </div>
@@ -895,6 +915,15 @@ export default function ModList() {
           {activeDragMod ? <DragOverlayContent mod={activeDragMod} /> : null}
         </DragOverlay>
       </DndContext>
+
+      {profileSwitching && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-morandi-page/60 backdrop-blur-[1px] pointer-events-none">
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-morandi-card shadow-sm border border-morandi-border-light text-sm text-morandi-text-secondary">
+            <div className="w-4 h-4 border-2 border-morandi-accent-light border-t-morandi-accent rounded-full animate-spin" />
+            {t("modlist.switchingProfile")}
+          </div>
+        </div>
+      )}
 
       {selectedMod && (
         <ModDetailModal

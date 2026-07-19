@@ -50,10 +50,10 @@ export default function NewPresetModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-morandi-text/20 backdrop-blur-sm" onClick={handleClose} />
-      <div className="relative card-morandi w-80 p-6">
-        <button onClick={handleClose} className="absolute top-3 right-3 p-1 rounded hover:bg-morandi-hover transition-colors">
-          <X className="w-4 h-4 text-morandi-text-secondary" />
+      <div className="modal-backdrop" onClick={handleClose} />
+      <div className="modal-panel w-80 p-6">
+        <button onClick={handleClose} className="absolute top-3 right-3 modal-close-btn">
+          <X className="w-4 h-4" />
         </button>
         <h3 className="text-base font-semibold text-morandi-text mb-4">{t("newPreset.title")}</h3>
 

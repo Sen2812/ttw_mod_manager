@@ -102,14 +102,12 @@ export default function SettingsPage() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-morandi-text/20 backdrop-blur-sm" onClick={() => setShowSettingsPage(false)} />
-      <div className="relative card-morandi w-[520px] max-h-[80vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-morandi-border-light">
-          <h2 className="text-lg font-semibold text-morandi-text">{t("settings.title")}</h2>
-          <button onClick={() => setShowSettingsPage(false)}
-            className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors">
-            <X className="w-5 h-5 text-morandi-text-secondary" />
+      <div className="modal-backdrop" onClick={() => setShowSettingsPage(false)} />
+      <div className="modal-panel w-[520px] max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="modal-header">
+          <h2 className="text-lg font-semibold text-morandi-text flex-1">{t("settings.title")}</h2>
+          <button onClick={() => setShowSettingsPage(false)} className="modal-close-btn">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -117,17 +115,17 @@ export default function SettingsPage() {
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {/* Language Section */}
           <div>
-            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.language")}</h3>
-            <p className="text-xs text-morandi-text-secondary mb-3">{t("settings.languageDesc")}</p>
-            <div className="bg-morandi-sidebar rounded-lg p-4">
+            <h3 className="section-title">{t("settings.language")}</h3>
+            <p className="section-desc">{t("settings.languageDesc")}</p>
+            <div className="surface-muted p-4">
               <LanguageToggle />
             </div>
           </div>
 
           {/* Launch Section */}
           <div>
-            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.launch")}</h3>
-            <div className="bg-morandi-sidebar rounded-lg p-4">
+            <h3 className="section-title">{t("settings.launch")}</h3>
+            <div className="surface-muted p-4">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -146,8 +144,8 @@ export default function SettingsPage() {
 
           {/* Current Game Section */}
           <div>
-            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.currentGame")}</h3>
-            <div className="bg-morandi-sidebar rounded-lg p-4">
+            <h3 className="section-title">{t("settings.currentGame")}</h3>
+            <div className="surface-muted p-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-morandi-accent/10 flex items-center justify-center">
                   <Gamepad2 className="w-5 h-5 text-morandi-accent" />
@@ -162,13 +160,13 @@ export default function SettingsPage() {
 
           {/* Data Directory Section */}
           <div>
-            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.dataDirectory")}</h3>
-            <p className="text-xs text-morandi-text-secondary mb-3">{t("settings.dataDirectoryDesc")}</p>
-            <div className="bg-morandi-sidebar rounded-lg p-4">
+            <h3 className="section-title">{t("settings.dataDirectory")}</h3>
+            <p className="section-desc">{t("settings.dataDirectoryDesc")}</p>
+            <div className="surface-muted p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-morandi-text-secondary uppercase tracking-wider">{t("settings.location")}</span>
+                <span className="field-label">{t("settings.location")}</span>
                 <button onClick={handleChangeDataDir} disabled={isChangingDir}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-morandi-accent hover:bg-morandi-hover transition-colors">
+                  className="btn-morandi-ghost !text-xs !text-morandi-accent">
                   {isChangingDir ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <FolderOpen className="w-3.5 h-3.5" />}
                   <span>{t("common.change")}</span>
                 </button>
@@ -181,7 +179,7 @@ export default function SettingsPage() {
 
           {/* File Locations Section */}
           <div>
-            <h3 className="text-sm font-semibold text-morandi-text mb-3">{t("settings.fileLocations")}</h3>
+            <h3 className="section-title">{t("settings.fileLocations")}</h3>
             <div className="space-y-3">
               <PathCard label={t("settings.presetsFile")} badge="JSON"
                 desc={t("settings.presetsDesc", { game: currentGameName })}
@@ -214,15 +212,14 @@ export default function SettingsPage() {
           </div>
 
           {/* Info Section */}
-          <div className="bg-morandi-accent/5 rounded-lg p-4 border border-morandi-accent/10">
+          <div className="info-callout">
             <p className="text-xs text-morandi-text-secondary leading-relaxed">
               {t("settings.tip")}
             </p>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-morandi-border-light">
+        <div className="modal-footer">
           <div className="flex justify-end">
             <button onClick={() => setShowSettingsPage(false)} className="btn-morandi">
               {t("common.done")}
@@ -240,15 +237,15 @@ function PathRow({ path, copied, onCopy, copyTitle, onOpen, openTitle }: {
   onOpen?: () => void; openTitle?: string;
 }) {
   return (
-    <div className="flex items-center gap-2 p-2.5 bg-morandi-page rounded-md">
+    <div className="path-row">
       <code className="flex-1 text-xs text-morandi-text font-mono truncate">{path}</code>
       {onOpen && (
-        <button onClick={onOpen} className="p-1.5 rounded hover:bg-morandi-hover transition-colors shrink-0" title={openTitle}
+        <button onClick={onOpen} className="icon-btn-sm shrink-0" title={openTitle}
           disabled={!path}>
-          <FolderOpen className="w-3.5 h-3.5 text-morandi-text-muted" />
+          <FolderOpen className="w-3.5 h-3.5" />
         </button>
       )}
-      <button onClick={onCopy} className="p-1.5 rounded hover:bg-morandi-hover transition-colors shrink-0" title={copyTitle}>
+      <button onClick={onCopy} className="icon-btn-sm shrink-0" title={copyTitle}>
         {copied ? <Check className="w-3.5 h-3.5 text-morandi-success" /> : <Copy className="w-3.5 h-3.5 text-morandi-text-muted" />}
       </button>
     </div>
@@ -262,9 +259,9 @@ function PathCard({ label, badge, desc, path, copied, onCopy, copyTitle, onOpen,
   onOpen?: () => void; openTitle?: string;
 }) {
   return (
-    <div className="bg-morandi-sidebar rounded-lg p-4">
+    <div className="surface-muted p-4">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-morandi-text-secondary uppercase tracking-wider">{label}</span>
+        <span className="field-label">{label}</span>
         <span className="text-xs text-morandi-text-muted">{badge}</span>
       </div>
       <p className="text-xs text-morandi-text-secondary mb-2">{desc}</p>

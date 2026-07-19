@@ -47,8 +47,8 @@ export default function ModDependencyModal() {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="modal-backdrop" onClick={close} />
       <div className="modal-panel w-[560px] max-w-[95vw] max-h-[75vh] flex flex-col overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-morandi-border-light shrink-0">
-          <div className="w-9 h-9 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+        <div className="modal-header">
+          <div className="thumb-morandi-sm">
             {mod.imgPath ? (
               <img src={`file:///${mod.imgPath.replace(/\\/g, '/')}`} className="w-full h-full object-cover" alt="" draggable={false} />
             ) : (
@@ -64,8 +64,8 @@ export default function ModDependencyModal() {
                 : t("dependency.allSatisfied")}
             </p>
           </div>
-          <button onClick={close} className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors shrink-0">
-            <X className="w-5 h-5 text-morandi-text-secondary" />
+          <button onClick={close} className="modal-close-btn">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
@@ -83,8 +83,8 @@ export default function ModDependencyModal() {
             </p>
           ) : (
             <>
-              <div className="text-[11px] text-morandi-text-muted mb-2">{t("dependency.missingRequiredList")}</div>
-              <ul className="rounded-lg border border-morandi-border-light px-3 bg-morandi-page/40">
+              <div className="section-label mb-2">{t("dependency.missingRequiredList")}</div>
+              <ul className="issue-list">
                 {issues.map(issue => (
                   <RequiredModIssueRow
                     key={`${issue.kind}-${issue.id}`}
@@ -97,7 +97,7 @@ export default function ModDependencyModal() {
           )}
         </div>
 
-        <div className="px-5 py-3 border-t border-morandi-border-light shrink-0 flex justify-end">
+        <div className="modal-footer flex justify-end">
           <button onClick={close} className="btn-morandi-ghost text-xs">{t("common.close")}</button>
         </div>
       </div>

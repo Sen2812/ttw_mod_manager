@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useStore } from "../store";
 import { useT } from "../i18n";
-import { useViewModeStore } from "../viewModeStore";
 import ConfirmDialog from "./ConfirmDialog";
-import { Plus, Trash2, RefreshCw, Save, Loader2, Star, Pencil, Check, X, Download, Upload, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, Trash2, Save, Loader2, Star, Pencil, Check, X, Download, Upload, ChevronLeft, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 
 const SIDEBAR_COLLAPSED_KEY = "ttw-sidebar-collapsed";
@@ -16,33 +15,22 @@ function readSidebarCollapsed(): boolean {
   }
 }
 
-/** 统计一个 preset/mod 列表中已启用的数量 */
-function countEnabled(mods: { isEnabled: boolean }[]): number {
-  return mods.filter((m) => m.isEnabled).length;
-}
-
 function buildProfileTooltip(
   t: (key: string, params?: Record<string, string | number>) => string,
   name: string,
-  enabled: number,
-  total: number,
   isActive: boolean,
 ): string {
-  const lines = [
-    name,
-    t("sidebar.modsCount", { n: total, m: enabled }),
-  ];
-  if (isActive) lines.push(t("sidebar.profileTooltipActive"));
-  else lines.push(t("sidebar.profileTooltipSwitch"));
+  const lines = [name];
+  lines.push(isActive ? t("sidebar.profileTooltipActive") : t("sidebar.profileTooltipSwitch"));
   return lines.join("\n");
 }
 
 export default function Sidebar() {
   const t = useT();
   const { presets, activePresetName, setActivePresetName, setShowNewPresetModal,
-    setMods, setPresets, enabledCount, totalCount, originalTotalCount,
-    isDirty, isSaving, saveCurrentState, markClean, markDirty, currentGame, mods,
-    saveError } = useStore();
+    setMods, setPresets, enabledCount, totalCount,
+    isDirty, isSaving, saveCurrentState, markDirty, currentGame, mods,
+    saveError, profileSwitching, beginPresetSwitch, finishPresetSwitch, cancelPresetSwitch } = useStore();
   const [presetToDelete, setPresetToDelete] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [importResultMsg, setImportResultMsg] = useState<string | null>(null);
@@ -76,17 +64,25 @@ export default function Sidebar() {
   }, [renamingPreset]);
 
   const doApply = async (name: string) => {
-    const result = await window.api.applyPreset(name);
-    if (Array.isArray(result)) {
-      setMods(result);
-      setActivePresetName(name);
-      setPresets(await window.api.getPresets());
-      markClean();
-      useStore.setState({ originalMods: result });
+    if (profileSwitching) return;
+    const previousName = activePresetName;
+    beginPresetSwitch(name);
+    try {
+      const result = await window.api.applyPreset(name);
+      if (Array.isArray(result)) {
+        finishPresetSwitch(name, result);
+      } else {
+        cancelPresetSwitch(previousName);
+        console.error("Failed to apply preset:", result);
+      }
+    } catch (e) {
+      cancelPresetSwitch(previousName);
+      console.error("Failed to apply preset:", e);
     }
   };
 
   const handleApply = (name: string) => {
+    if (profileSwitching) return;
     if (name === activePresetName && !isDirty) return;
     if (isDirty) {
       setPendingSwitch(name);
@@ -103,9 +99,7 @@ export default function Sidebar() {
     if ("presets" in result && result.presets) {
       setPresets(result.presets);
       if (result.mods) {
-        setMods(result.mods);
-        useStore.setState({ originalMods: result.mods });
-        markClean();
+        finishPresetSwitch(result.activePresetName ?? "Default", result.mods);
       }
       if (result.activePresetName) setActivePresetName(result.activePresetName);
     } else if (Array.isArray(result)) {
@@ -113,12 +107,6 @@ export default function Sidebar() {
       if (activePresetName === presetToDelete) setActivePresetName("Default");
     }
     setPresetToDelete(null);
-  };
-
-  const handleUpdate = async () => {
-    if (!activePresetName) return;
-    const result = await window.api.updatePreset(activePresetName);
-    if (Array.isArray(result)) setPresets(result);
   };
 
   const handleExportOrder = async () => {
@@ -194,23 +182,9 @@ export default function Sidebar() {
     // 更新 presets + activePresetName（后端在重命名激活 profile 时会改激活名）
     setPresets(result.presets);
     setActivePresetName(result.activePresetName);
-    // 迁移 viewMode 记忆：旧 key → 新 key，避免重命名后显示模式丢失
-    const oldKey = `${currentGame}:${oldName}`;
-    const newKey = `${currentGame}:${newName}`;
-    const modes = useViewModeStore.getState().modes;
-    if (modes[oldKey] !== undefined) {
-      const newModes = { ...modes, [newKey]: modes[oldKey] };
-      delete newModes[oldKey];
-      useViewModeStore.setState({ modes: newModes });
-    }
     setRenamingPreset(null);
     setRenameError(null);
   };
-
-  const hasDefaultProfile = presets.some(p => p.name === "Default");
-  const defaultCount = activePresetName === "Default"
-    ? enabledCount()
-    : countEnabled(presets.find((p) => p.name === "Default")?.mods ?? []);
 
   return (
     <div className={clsx(
@@ -222,7 +196,7 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={toggleCollapsed}
-            className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors"
+            className="icon-btn"
             title={t("sidebar.expandProfiles")}
             aria-label={t("sidebar.expandProfiles")}
           >
@@ -234,10 +208,9 @@ export default function Sidebar() {
             onClick={saveCurrentState}
             disabled={!isDirty || isSaving}
             className={clsx(
-              "relative p-1.5 rounded-lg transition-colors shrink-0",
-              isDirty
-                ? "text-morandi-accent hover:bg-morandi-hover"
-                : "text-morandi-text-muted cursor-not-allowed opacity-50",
+              "icon-btn relative shrink-0",
+              !isDirty && "opacity-50 cursor-not-allowed pointer-events-none",
+              isDirty && "text-morandi-accent",
             )}
             title={t("sidebar.saveChanges")}
             aria-label={t("sidebar.saveChanges")}
@@ -255,48 +228,41 @@ export default function Sidebar() {
       ) : (
         <>
       <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-1">
-        <h2 className="text-xs font-semibold text-morandi-text-secondary uppercase tracking-wider truncate">{t("sidebar.profiles")}</h2>
+        <h2 className="field-label truncate">{t("sidebar.profiles")}</h2>
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             type="button"
             onClick={() => setShowNewPresetModal(true)}
-            className="p-1 rounded hover:bg-morandi-hover transition-colors"
+            className="icon-btn-sm"
             title={t("newPreset.title")}
           >
-            <Plus className="w-3.5 h-3.5 text-morandi-text-secondary" />
+            <Plus className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={toggleCollapsed}
-            className="p-1 rounded hover:bg-morandi-hover transition-colors"
+            className="icon-btn-sm"
             title={t("sidebar.collapseProfiles")}
             aria-label={t("sidebar.collapseProfiles")}
           >
-            <ChevronLeft className="w-3.5 h-3.5 text-morandi-text-secondary" />
+            <ChevronLeft className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {/* Default Profile */}
         <button onClick={() => handleApply("Default")}
+          disabled={profileSwitching}
           title={buildProfileTooltip(
             t,
             t("sidebar.defaultProfile"),
-            defaultCount,
-            totalCount(),
             activePresetName === "Default",
           )}
-          className={clsx("w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-150",
-            activePresetName === "Default" ? "bg-morandi-sidebar-active text-morandi-text font-medium shadow-sm"
-            : "text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text")}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Star className="w-3.5 h-3.5 text-morandi-accent" />
-              <span>{t("sidebar.defaultProfile")}</span>
-            </div>
-            <span className="text-xs text-morandi-text-muted">
-              {defaultCount}/{totalCount()}
-            </span>
+          className={clsx("nav-item",
+            activePresetName === "Default" && "nav-item-active")}>
+          <div className="flex items-center gap-1.5">
+            <Star className="w-3.5 h-3.5 text-morandi-accent" />
+            <span>{t("sidebar.defaultProfile")}</span>
           </div>
         </button>
 
@@ -306,10 +272,7 @@ export default function Sidebar() {
           const isRenaming = renamingPreset === preset.name;
           return (
             <div key={preset.name}
-              className={clsx(
-                "group flex items-center gap-1 rounded-lg transition-all duration-150",
-                isActive ? "bg-morandi-sidebar-active shadow-sm" : "hover:bg-morandi-hover",
-              )}>
+              className={clsx("group nav-row", isActive && "nav-row-active")}>
               {isRenaming ? (
                 // ── 重命名模式：名称变成输入框 ──
                 <>
@@ -323,18 +286,18 @@ export default function Sidebar() {
                       else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
                     }}
                     placeholder={t("sidebar.renamePlaceholder")}
-                    className="flex-1 min-w-0 mx-2 my-1 px-2 py-1 text-sm bg-morandi-page border border-morandi-accent-light rounded text-morandi-text focus:outline-none focus:ring-2 focus:ring-morandi-accent-light"
+                    className="flex-1 min-w-0 mx-2 my-1 input-morandi !py-1 !text-sm"
                   />
                   <div className="flex items-center gap-0.5 shrink-0 pr-1.5">
                     <button onClick={e => { e.stopPropagation(); confirmRename(); }}
-                      className="p-1 rounded hover:bg-morandi-page transition-colors"
+                      className="icon-btn-sm"
                       title={t("common.confirm")}>
                       <Check className="w-3 h-3 text-morandi-success" />
                     </button>
                     <button onClick={e => { e.stopPropagation(); cancelRename(); }}
-                      className="p-1 rounded hover:bg-morandi-page transition-colors"
+                      className="icon-btn-sm"
                       title={t("common.cancel")}>
-                      <X className="w-3 h-3 text-morandi-text-secondary hover:text-morandi-danger" />
+                      <X className="w-3 h-3 text-morandi-danger" />
                     </button>
                   </div>
                 </>
@@ -342,39 +305,24 @@ export default function Sidebar() {
                 // ── 普通模式 ──
                 <>
                   <button onClick={() => handleApply(preset.name)}
-                    title={buildProfileTooltip(
-                      t,
-                      preset.name,
-                      isActive ? enabledCount() : countEnabled(preset.mods),
-                      originalTotalCount(),
-                      isActive,
-                    )}
-                    className="flex-1 min-w-0 flex items-center justify-between gap-2 px-3 py-2 text-sm text-left">
-                    <span className={clsx("truncate",
+                    disabled={profileSwitching}
+                    title={buildProfileTooltip(t, preset.name, isActive)}
+                    className="flex-1 min-w-0 px-3 py-2 text-sm text-left">
+                    <span className={clsx("truncate block",
                       isActive ? "text-morandi-text font-medium" : "text-morandi-text-secondary")}>
                       {preset.name}
                     </span>
-                    <span className="text-xs text-morandi-text-muted shrink-0">
-                      {isActive ? enabledCount() : countEnabled(preset.mods)}/{originalTotalCount()}
-                    </span>
                   </button>
                   <div className="flex items-center gap-0.5 shrink-0 pr-1.5">
-                    {isActive && (
-                      <button onClick={e => { e.stopPropagation(); handleUpdate(); }}
-                        className="p-1 rounded hover:bg-morandi-page transition-colors"
-                        title={t("sidebar.updateProfile")}>
-                        <RefreshCw className="w-3 h-3 text-morandi-text-secondary" />
-                      </button>
-                    )}
                     <button onClick={e => { e.stopPropagation(); startRename(preset.name); }}
-                        className="p-1 rounded hover:bg-morandi-page transition-colors"
+                        className="icon-btn-sm"
                         title={t("sidebar.renameProfile")}>
-                      <Pencil className="w-3 h-3 text-morandi-text-secondary hover:text-morandi-accent" />
+                      <Pencil className="w-3 h-3" />
                     </button>
                     <button onClick={e => { e.stopPropagation(); handleDelete(preset.name); }}
-                        className="p-1 rounded hover:bg-morandi-danger-light transition-colors"
+                        className="icon-btn-sm hover:text-morandi-danger hover:bg-morandi-danger-light"
                         title={t("sidebar.deleteProfile")}>
-                      <Trash2 className="w-3 h-3 text-morandi-text-secondary hover:text-morandi-danger" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 </>
@@ -392,7 +340,7 @@ export default function Sidebar() {
           <button
             onClick={handleExportOrder}
             disabled={!activePresetName || isExportingOrder}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-morandi-text-secondary hover:bg-morandi-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-morandi-subtle flex-1"
             title={t("sidebar.exportOrder")}
           >
             {isExportingOrder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -401,7 +349,7 @@ export default function Sidebar() {
           <button
             onClick={handleImportOrder}
             disabled={isImportingOrder}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium text-morandi-text-secondary hover:bg-morandi-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-morandi-subtle flex-1"
             title={t("sidebar.importOrder")}
           >
             {isImportingOrder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
@@ -420,10 +368,10 @@ export default function Sidebar() {
           onClick={saveCurrentState}
           disabled={!isDirty || isSaving}
           className={clsx(
-            "w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-all duration-150",
+            "w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-morandi",
             isDirty
-              ? "bg-morandi-accent text-white hover:bg-morandi-accent-hover active:scale-[0.97]"
-              : "bg-morandi-border text-morandi-text-muted cursor-not-allowed"
+              ? "btn-morandi !w-full"
+              : "bg-morandi-border text-morandi-text-muted cursor-not-allowed",
           )}
         >
           {isSaving ? (

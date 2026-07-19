@@ -29,7 +29,7 @@ ttw_mod_manager/
 │   └── index.ts            # 库公共导出
 ├── desktop/
 │   ├── src/                # React 渲染进程
-│   │   ├── App.tsx, store.ts, viewModeStore.ts
+│   │   ├── App.tsx, store.ts
 │   │   ├── components/     # ModList, Sidebar, TopBar, SettingsPage 等
 │   │   ├── i18n/           # zh / en 双语
 │   │   └── types.ts        # window.api 类型（与 preload 对齐）
@@ -111,7 +111,6 @@ React (renderer)  ←window.api→  preload.cjs  ←IPC→  main.ts  →  ModMan
 | Store | 文件 | 持久化 |
 |---|---|---|
 | 主应用状态 | `store.ts` | 无（靠 IPC 保存到 dataDir） |
-| 视图过滤模式 | `viewModeStore.ts` | localStorage，按 `gameId:profileName` |
 | 语言 | `i18n/index.ts` | localStorage |
 
 **脏数据流**：用户改 mod 顺序/启用 → `isDirty` → 显式 Save 或关闭/启动前确认 → `save-mod-state` / `save-presets` IPC。
@@ -140,7 +139,7 @@ React (renderer)  ←window.api→  preload.cjs  ←IPC→  main.ts  →  ModMan
 | `Sidebar` | Profile 切换与管理 |
 | `TopBar` | 保存、启动、更新检查、设置入口 |
 | `CompatPanel` | 覆盖/冲突详情 |
-| `ModDependencyModal` / `DependencyAlertModal` | 依赖查看与批量告警 |
+| `ModDependencyModal` | 依赖查看 |
 | `ModUpdateModal` | Workshop 单项/批量更新 |
 | `SettingsPage` | 数据目录、偏好、路径 |
 | `SteamStatusHint` | Steam 连接状态 |

@@ -100,17 +100,17 @@ export default function TopBar() {
       </div>
       <div className="relative">
         <button onClick={() => setShowGameMenu(!showGameMenu)}
-          className="titlebar-no-drag flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-morandi-text-secondary hover:bg-morandi-hover transition-colors">
+          className="titlebar-no-drag btn-morandi-ghost flex items-center gap-1.5 !px-3 !py-1.5">
           <span>{currentGameName}</span><ChevronDown className="w-3.5 h-3.5" />
         </button>
         {showGameMenu && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setShowGameMenu(false)} />
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 bg-morandi-card border border-morandi-border rounded-xl shadow-morandi-lg py-1 min-w-[180px]">
+            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 menu-popover min-w-[180px]">
               {games.map(game => (
                 <button key={game.id} onClick={() => handleGameChange(game.id)}
-                  className={clsx("w-full px-3 py-2 text-left text-sm transition-colors",
-                    game.id === currentGame ? "bg-morandi-sidebar text-morandi-text font-medium" : "text-morandi-text-secondary hover:bg-morandi-hover")}>
+                  className={clsx("menu-item",
+                    game.id === currentGame && "menu-item-active")}>
                   {game.name}
                 </button>
               ))}
@@ -123,7 +123,7 @@ export default function TopBar() {
         <LanguageToggle compact />
         <button
           onClick={() => setShowSettingsPage(true)}
-          className="titlebar-no-drag p-2 rounded-lg hover:bg-morandi-hover transition-colors"
+          className="titlebar-no-drag icon-btn"
           title={t("topbar.settings")}
         >
           <Settings className="w-4 h-4 text-morandi-text-secondary" />

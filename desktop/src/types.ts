@@ -1,8 +1,7 @@
 export interface Mod {
   name: string; humanName: string; path: string; workshopId: string;
   isEnabled: boolean; loadOrder?: number; author: string; imgPath: string;
-  isInData: boolean; tags: string[]; categories?: string[];
-  dependencyPacks?: string[];
+  isInData: boolean; tags: string[]; dependencyPacks?: string[];
   modDirectory: string;
   isDeleted: boolean;
   isMovie: boolean;
@@ -12,7 +11,6 @@ export interface Mod {
   lastChanged?: number;
   isInModding?: boolean;
   isSymbolicLink?: boolean;
-  mergedModsData?: { mergedFrom: { name: string; path: string }[] } | null;
   reqModIdToName?: [string, string][];
   reqModIds?: string[];
   customTags?: string[];
@@ -135,7 +133,6 @@ declare global {
         error?: string;
       }>;
       renamePreset: (oldName: string, newName: string) => Promise<{ presets: Preset[]; activePresetName: string } | ApiResponse>;
-      updatePreset: (n: string) => Promise<Preset[] | ApiResponse>;
       setActivePresetName: (n: string | null) => Promise<{ ok: boolean }>;
       exportProfileOrder: (profileName: string, mods?: Mod[]) => Promise<{ ok: boolean; path?: string; error?: string }>;
       importProfileOrder: (mods?: Mod[]) => Promise<{
@@ -167,7 +164,8 @@ declare global {
       setDataDir: (d: string) => Promise<{ ok: boolean; dataDir: string } & Partial<BootstrapResponse>>;
       setUnsavedChanges: (hasChanges: boolean) => Promise<{ ok: boolean }>;
       hasUnsavedChanges: () => Promise<boolean>;
-      analyzeOverwrites: () => Promise<OverwriteAnalysis>;
+      analyzeOverwrites: (opts?: { statsOnly?: boolean }) => Promise<OverwriteAnalysis>;
+      fetchWorkshopTitles: (workshopIds: string[]) => Promise<{ ok: boolean; applied: number; mods: Mod[] }>;
       checkModUpdates: (force?: boolean) => Promise<{ mods: Mod[]; outdatedCount: number }>;
       forceUpdateMod: (modName: string) => Promise<{
         ok: boolean;

@@ -11,9 +11,9 @@ import * as https from "https";
 import { GameDefinition, GameFolderPaths, Mod } from "../types";
 import { readPackHeader, NodeBinaryReader } from "../pack-file";
 import { lookupLauncherModName, readLauncherModNameIndex } from "../launcher/launcher-sync";
-import { fetchWorkshopHtml, parseWorkshopTitle, resolveSteamWorkshopLanguage, sleep } from "./workshop-dependencies";
-import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
 import { formatSteamFetchSkipReason, isSteamIpcUnavailableError } from "./steam-ipc-error";
+import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
+import { sleep } from "./workshop-dependencies";
 import { fetchSubscribedWorkshopIds } from "./workshop-subscriptions-fetcher";
 import { applyWorkshopTitle, isUsableWorkshopTitle, resolveModWorkshopId } from "./mod-display";
 export { resolveModWorkshopId } from "./mod-display";
@@ -29,12 +29,31 @@ import { applyWorkshopTimeUpdatedToMods } from "./workshop-update-status";
 export type { WorkshopItemData, WorkshopFetchMode };
 export { WorkshopCache, METADATA_TTL_MS, REQUIRED_IDS_TTL_MS, REQUIRED_IDS_CACHE_GENERATION } from "./workshop-cache";
 
+const PACK_SCAN_CONCURRENCY = 12;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R | null | undefined>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = [];
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < items.length) {
+      const i = nextIndex++;
+      const value = await fn(items[i]);
+      if (value != null) results.push(value);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
+
 export type LogCallback = (msg: string) => void;
 
 /** Delay between Steam Web API batches to avoid burst traffic. */
 const API_BATCH_DELAY_MS = 1200;
-/** Delay between workshop HTML title fetches (display names only, not required mods). */
-const TITLE_FETCH_DELAY_MS = 1500;
 
 function isNumericWorkshopId(id: string | undefined): id is string {
   return !!id && /^\d{5,15}$/.test(id);
@@ -858,40 +877,6 @@ function applyLauncherModNames(mods: Mod[], game: GameDefinition, log?: LogCallb
   return applied;
 }
 
-async function fetchMissingWorkshopTitles(
-  mods: Mod[],
-  cache: WorkshopCache,
-  log?: LogCallback,
-): Promise<void> {
-  const pending = mods.filter(
-    (m) => /^\d{5,15}$/.test(m.workshopId) && !isUsableWorkshopTitle(m.humanName, m.workshopId),
-  );
-  if (pending.length === 0) return;
-
-  log?.(`Workshop titles: fetching ${pending.length} missing name(s) from workshop pages...`);
-  const preferredLang = resolveSteamWorkshopLanguage();
-  for (const mod of pending) {
-    await sleep(TITLE_FETCH_DELAY_MS);
-    try {
-      let html = await fetchWorkshopHtml(mod.workshopId, preferredLang);
-      let title = parseWorkshopTitle(html);
-      if (!applyWorkshopTitle(mod, title) && preferredLang !== "english") {
-        html = await fetchWorkshopHtml(mod.workshopId, "english");
-        title = parseWorkshopTitle(html);
-        applyWorkshopTitle(mod, title);
-      }
-      if (isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
-        cache.mergeMetadata([[mod.workshopId, { title: mod.humanName }]]);
-      } else {
-        log?.(`  Workshop ${mod.workshopId}: title unavailable (removed/private or login required)`);
-      }
-    } catch (e) {
-      log?.(`  Failed to fetch title for ${mod.workshopId}: ${e}`);
-    }
-  }
-  cache.save();
-}
-
 /**
  * Build a Mod from a Workshop content subfolder.
  */
@@ -1060,7 +1045,6 @@ export async function enrichWorkshopNetwork(
       }
     }
 
-    await fetchMissingWorkshopTitles(mods, cache, log);
     applyLauncherModNames(mods, game, log);
 
     applyWorkshopTimeUpdatedToMods(mods, workshopData);
@@ -1149,47 +1133,50 @@ export async function scanMods(
     log?.("Game path not set, cannot scan mods");
     return { mods, vanillaPacks: new Set(), subscribedWorkshopIds: [] };
   }
+  const gamePath = folderPaths.gamePath;
 
   // Get vanilla pack names
-  const vanillaPacks = getVanillaPackNames(game, folderPaths.gamePath);
+  const vanillaPacks = getVanillaPackNames(game, gamePath);
   log?.(`Found ${vanillaPacks.size} vanilla packs`);
 
   // Scan data/modding/ folder
-  const moddingPath = path.join(folderPaths.gamePath, "data", "modding");
+  const moddingPath = path.join(gamePath, "data", "modding");
   if (fs.existsSync(moddingPath)) {
     log?.("Scanning data/modding/ folder...");
     const files = fs.readdirSync(moddingPath);
-    for (const file of files) {
-      if (!file.endsWith(".pack")) continue;
+    const packFiles = files.filter(file => file.endsWith(".pack"));
+    const moddingMods = await mapWithConcurrency(packFiles, PACK_SCAN_CONCURRENCY, async (file) => {
       const filePath = path.join(moddingPath, file);
       try {
-        const mod = await buildDataMod(filePath, path.join(folderPaths.gamePath, "data"), true);
-        mods.push(mod);
+        return await buildDataMod(filePath, path.join(gamePath, "data"), true);
       } catch (e) {
         log?.(`  Error reading mod ${file}: ${e}`);
+        return null;
       }
-    }
+    });
+    mods.push(...moddingMods);
     log?.(`  Found ${mods.length} mods in data/modding/`);
   }
 
   // Scan data/ folder
-  const dataPath = path.join(folderPaths.gamePath, "data");
+  const dataPath = path.join(gamePath, "data");
   if (fs.existsSync(dataPath)) {
     log?.("Scanning data/ folder...");
     const dataModCount = mods.length;
     const files = fs.readdirSync(dataPath);
-    for (const file of files) {
-      if (!file.endsWith(".pack")) continue;
-      if (vanillaPacks.has(file)) continue; // Skip vanilla packs
+    const packFiles = files.filter(file => file.endsWith(".pack") && !vanillaPacks.has(file));
+    const dataMods = await mapWithConcurrency(packFiles, PACK_SCAN_CONCURRENCY, async (file) => {
       const filePath = path.join(dataPath, file);
       try {
-        const mod = await buildDataMod(filePath, dataPath, false);
-        // Skip if already found in modding/
-        if (mods.some((m) => m.name === mod.name && m.isInModding)) continue;
-        mods.push(mod);
+        return await buildDataMod(filePath, dataPath, false);
       } catch (e) {
         log?.(`  Error reading mod ${file}: ${e}`);
+        return null;
       }
+    });
+    for (const mod of dataMods) {
+      if (mods.some((m) => m.name === mod.name && m.isInModding)) continue;
+      mods.push(mod);
     }
     log?.(`  Found ${mods.length - dataModCount} mods in data/`);
   }
@@ -1261,7 +1248,6 @@ export async function scanMods(
           }
         }
 
-        await fetchMissingWorkshopTitles(mods, cache, log);
         applyLauncherModNames(mods, game, log);
 
         applyWorkshopTimeUpdatedToMods(mods, workshopData);

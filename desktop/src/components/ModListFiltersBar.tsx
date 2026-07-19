@@ -10,7 +10,7 @@ interface ModListFiltersBarProps {
   availableTags: string[];
 }
 
-const selectClass = "input-morandi !py-1.5 !text-xs min-w-0 max-w-full";
+const selectClass = "select-morandi min-w-0 max-w-full";
 
 export default function ModListFiltersBar({
   filters,
@@ -39,7 +39,7 @@ export default function ModListFiltersBar({
       </div>
 
       <label className="flex items-center gap-1.5 shrink-0">
-        <span className="text-[11px] text-morandi-text-muted whitespace-nowrap">{t("modlist.filterBySource")}</span>
+        <span className="section-label">{t("modlist.filterBySource")}</span>
         <select
           value={filters.source}
           onChange={(e) => patch({ source: e.target.value as ModListFilterState["source"] })}
@@ -53,7 +53,7 @@ export default function ModListFiltersBar({
       </label>
 
       <label className="flex items-center gap-1.5 shrink-0 min-w-0">
-        <span className="text-[11px] text-morandi-text-muted whitespace-nowrap">{t("modlist.filterByTag")}</span>
+        <span className="section-label">{t("modlist.filterByTag")}</span>
         <select
           value={filters.tag}
           onChange={(e) => patch({ tag: e.target.value })}

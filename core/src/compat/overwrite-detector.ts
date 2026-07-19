@@ -99,8 +99,9 @@ export interface ModForAnalysis {
 export function detectOverwrites(
   mods: ModForAnalysis[],
   indices: Map<string, PackIndex>,
-  options: { modPathByName?: Map<string, string> } = {},
+  options: { modPathByName?: Map<string, string>; includeConflicts?: boolean } = {},
 ): OverwriteAnalysis {
+  const includeConflicts = options.includeConflicts !== false;
   // fileName → list of { modName, loadOrder, size }
   const fileOwners = new Map<string, ConflictParticipant[]>();
 
@@ -131,32 +132,6 @@ export function detectOverwrites(
 
   // Build conflicts for files owned by more than one mod.
   const conflicts: FileConflict[] = [];
-  for (const [fileName, owners] of fileOwners) {
-    if (owners.length < 2) continue;
-
-    // Sort by loadOrder ascending (earlier loaded first). Winner = last.
-    owners.sort((a, b) => a.loadOrder - b.loadOrder);
-    const winner = owners[owners.length - 1].modName;
-    const losers = owners.slice(0, -1).map((o) => o.modName);
-
-    conflicts.push({
-      fileName,
-      category: categorize(fileName),
-      participants: owners,
-      winner,
-      losers,
-    });
-  }
-
-  // Sort: more participants first, then alphabetically.
-  conflicts.sort((a, b) => {
-    if (b.participants.length !== a.participants.length) {
-      return b.participants.length - a.participants.length;
-    }
-    return a.fileName < b.fileName ? -1 : 1;
-  });
-
-  // Per-mod stats + pairwise relationships.
   const modStats = new Map<string, ModConflictStats>();
   const getStats = (name: string): ModConflictStats => {
     let s = modStats.get(name);
@@ -169,10 +144,8 @@ export function detectOverwrites(
   const bump = (name: string, field: "wins" | "losses" | "total") => {
     getStats(name)[field]++;
   };
-  // Pairwise counters: key = "winnerName\u0000loserName" → file count.
-  // We accumulate then convert to relation arrays.
-  const overwritesCount = new Map<string, Map<string, number>>(); // winner → (loser → count)
-  const overwrittenByCount = new Map<string, Map<string, number>>(); // loser → (winner → count)
+  const overwritesCount = new Map<string, Map<string, number>>();
+  const overwrittenByCount = new Map<string, Map<string, number>>();
   const bumpPair = (
     table: Map<string, Map<string, number>>,
     a: string,
@@ -183,20 +156,45 @@ export function detectOverwrites(
     inner.set(b, (inner.get(b) ?? 0) + 1);
   };
 
-  for (const c of conflicts) {
-    for (const p of c.participants) {
+  let totalConflicts = 0;
+  for (const [fileName, owners] of fileOwners) {
+    if (owners.length < 2) continue;
+    totalConflicts++;
+
+    owners.sort((a, b) => a.loadOrder - b.loadOrder);
+    const winner = owners[owners.length - 1].modName;
+    const losers = owners.slice(0, -1).map((o) => o.modName);
+
+    for (const p of owners) {
       bump(p.modName, "total");
-      if (p.modName === c.winner) bump(p.modName, "wins");
+      if (p.modName === winner) bump(p.modName, "wins");
       else bump(p.modName, "losses");
     }
-    // Record pairwise: winner overwrites every loser on this file.
-    for (const loser of c.losers) {
-      bumpPair(overwritesCount, c.winner, loser);
-      bumpPair(overwrittenByCount, loser, c.winner);
+    for (const loser of losers) {
+      bumpPair(overwritesCount, winner, loser);
+      bumpPair(overwrittenByCount, loser, winner);
+    }
+
+    if (includeConflicts) {
+      conflicts.push({
+        fileName,
+        category: categorize(fileName),
+        participants: owners,
+        winner,
+        losers,
+      });
     }
   }
 
-  // Convert counters → sorted relation arrays.
+  if (includeConflicts) {
+    conflicts.sort((a, b) => {
+      if (b.participants.length !== a.participants.length) {
+        return b.participants.length - a.participants.length;
+      }
+      return a.fileName < b.fileName ? -1 : 1;
+    });
+  }
+
   const toRelations = (m: Map<string, number> | undefined): ModRelation[] => {
     if (!m) return [];
     return [...m.entries()]
@@ -212,6 +210,6 @@ export function detectOverwrites(
     conflicts,
     modStats,
     modsWithConflicts: modStats.size,
-    totalConflicts: conflicts.length,
+    totalConflicts: includeConflicts ? conflicts.length : totalConflicts,
   };
 }

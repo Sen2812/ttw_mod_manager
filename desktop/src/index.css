@@ -24,14 +24,237 @@
 }
 
 @layer components {
-  .btn-morandi { @apply px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 bg-morandi-accent text-white hover:bg-morandi-accent-hover active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed; }
-  .btn-morandi-ghost { @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97]; }
-  .btn-morandi-danger { @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 text-morandi-danger hover:bg-morandi-danger-light active:scale-[0.97]; }
-  .btn-morandi-warning { @apply px-4 py-2 rounded-lg text-sm font-medium transition-all duration-150 bg-morandi-warning text-white hover:opacity-90 active:scale-[0.97]; }
+  /* ─── Motion & focus ─────────────────────────────────────────────── */
+  .transition-morandi { @apply transition-all duration-150; }
+  .focus-morandi { @apply focus:outline-none focus:ring-2 focus:ring-morandi-accent-light focus:ring-offset-0; }
+
+  /* ─── Buttons ────────────────────────────────────────────────────── */
+  .btn-morandi {
+    @apply px-4 py-2 rounded-lg text-sm font-medium transition-morandi
+    bg-morandi-accent text-white hover:bg-morandi-accent-hover active:scale-[0.97]
+    disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-morandi-ghost {
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97];
+  }
+  .btn-morandi-danger {
+    @apply px-3 py-1.5 rounded-lg text-sm font-medium transition-morandi
+    text-morandi-danger hover:bg-morandi-danger-light active:scale-[0.97];
+  }
+  .btn-morandi-danger-solid {
+    @apply px-4 py-2 rounded-lg text-sm font-medium transition-morandi
+    bg-morandi-danger text-white hover:opacity-90 active:scale-[0.97];
+  }
+  .btn-morandi-warning {
+    @apply px-4 py-2 rounded-lg text-sm font-medium transition-morandi
+    bg-morandi-warning text-white hover:opacity-90 active:scale-[0.97];
+  }
+  .btn-morandi-subtle {
+    @apply flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover
+    disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* ─── Icon buttons ───────────────────────────────────────────────── */
+  .icon-btn {
+    @apply inline-flex items-center justify-center p-1.5 rounded-md transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97]
+    disabled:opacity-35 disabled:cursor-not-allowed disabled:pointer-events-none;
+  }
+  .icon-btn-sm {
+    @apply inline-flex items-center justify-center p-1 rounded-md transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97]
+    disabled:opacity-35 disabled:cursor-not-allowed disabled:pointer-events-none;
+  }
+  .icon-btn-bordered {
+    @apply inline-flex items-center justify-center p-1 rounded-md transition-morandi
+    border border-morandi-border bg-morandi-sidebar text-morandi-text
+    hover:bg-morandi-hover hover:border-morandi-accent/35 active:scale-[0.97]
+    disabled:opacity-35 disabled:cursor-not-allowed disabled:pointer-events-none;
+  }
+  .icon-btn-danger {
+    @apply inline-flex items-center justify-center p-1 rounded-md transition-morandi
+    border border-morandi-danger/45 bg-morandi-danger-light text-morandi-danger
+    hover:bg-morandi-danger/15 hover:border-morandi-danger/60 active:scale-[0.97];
+  }
+  .icon-btn-accent {
+    @apply inline-flex items-center justify-center p-1 rounded-md transition-morandi
+    border border-morandi-accent/30 bg-morandi-accent/10 text-morandi-accent
+    hover:bg-morandi-accent/20 hover:border-morandi-accent/45 active:scale-[0.97];
+  }
+  .icon-btn-warning {
+    @apply inline-flex items-center justify-center p-1 rounded-md transition-morandi
+    border border-morandi-warning/35 bg-morandi-warning-light/50 text-morandi-warning
+    hover:bg-morandi-warning-light hover:border-morandi-warning/50 active:scale-[0.97];
+  }
+  .icon-btn-accent-solid {
+    @apply inline-flex items-center justify-center w-7 h-7 rounded-md transition-morandi
+    border border-morandi-accent/30 bg-morandi-accent/10 text-morandi-accent
+    hover:bg-morandi-accent hover:text-white hover:border-morandi-accent active:scale-[0.97];
+  }
+
+  /* ─── Surfaces & panels ──────────────────────────────────────────── */
   .card-morandi { @apply bg-morandi-card rounded-xl border border-morandi-border-light shadow-morandi; }
-  .input-morandi { @apply w-full px-3 py-2 rounded-lg text-sm bg-morandi-page border border-morandi-border text-morandi-text placeholder:text-morandi-text-muted focus:outline-none focus:ring-2 focus:ring-morandi-accent-light focus:border-transparent transition-all duration-150; }
-  .drag-overlay { @apply bg-morandi-card rounded-lg shadow-morandi-lg border border-morandi-accent-light opacity-90 scale-[1.02]; }
-  .modal-backdrop { @apply absolute inset-0 bg-morandi-text/30 backdrop-blur-sm animate-[fadeIn_150ms_ease-out]; }
-  .modal-panel { @apply relative card-morandi animate-[modalIn_200ms_ease-out]; }
+  .surface-muted { @apply bg-morandi-sidebar rounded-lg border border-morandi-border-light; }
+  .surface-muted-flat { @apply bg-morandi-sidebar rounded-lg; }
+  .panel-header { @apply px-4 py-3 border-b border-morandi-border-light bg-morandi-sidebar/45 shrink-0; }
+  .panel-toolbar { @apply px-4 py-3 border-b border-morandi-border-light bg-morandi-card flex items-center gap-3 shrink-0; }
+  .panel-footer { @apply px-4 py-3 border-t border-morandi-border-light shrink-0; }
+
+  /* ─── Lists & navigation ─────────────────────────────────────────── */
+  .list-row {
+    @apply flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light
+    transition-colors duration-150 cursor-pointer hover:bg-morandi-hover/70;
+  }
+  .list-row-catalog {
+    @apply flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light
+    transition-colors duration-150 cursor-pointer hover:bg-morandi-hover/70 bg-morandi-page/35;
+  }
+  .list-row-profile {
+    @apply flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light
+    transition-colors duration-150 cursor-pointer hover:bg-morandi-hover/70 bg-morandi-card;
+  }
+  .list-row-highlight { @apply bg-morandi-accent-light/15; }
+
+  .nav-item {
+    @apply w-full text-left px-3 py-2 rounded-lg text-sm transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text;
+  }
+  .nav-item-active {
+    @apply bg-morandi-sidebar-active text-morandi-text font-medium shadow-sm;
+  }
+  .nav-row {
+    @apply flex items-center gap-1 rounded-lg transition-morandi hover:bg-morandi-hover;
+  }
+  .nav-row-active { @apply bg-morandi-sidebar-active shadow-sm; }
+
+  /* ─── Menus & overlays ───────────────────────────────────────────── */
+  .menu-popover {
+    @apply bg-morandi-card border border-morandi-border rounded-xl shadow-morandi-lg py-1;
+  }
+  .menu-item {
+    @apply w-full px-3 py-2 text-left text-sm transition-morandi
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text;
+  }
+  .menu-item-active { @apply bg-morandi-sidebar-active text-morandi-text font-medium; }
+
+  .overlay-scrim { @apply absolute inset-0 bg-morandi-text/30 backdrop-blur-sm animate-[fadeIn_150ms_ease-out]; }
+  .modal-backdrop { @apply overlay-scrim; }
+  .modal-shell { @apply fixed inset-0 z-50 flex items-center justify-center; }
+  .modal-panel {
+    @apply relative z-10 bg-morandi-card rounded-xl border border-morandi-border-light shadow-morandi animate-[modalIn_200ms_ease-out];
+  }
+  .modal-header { @apply flex items-center gap-3 px-5 py-3.5 border-b border-morandi-border-light shrink-0; }
+  .modal-footer { @apply px-5 py-3 border-t border-morandi-border-light shrink-0; }
+  .modal-close-btn {
+    @apply inline-flex items-center justify-center p-1.5 rounded-md transition-morandi shrink-0
+    text-morandi-text-secondary hover:bg-morandi-hover hover:text-morandi-text active:scale-[0.97];
+  }
+
+  /* ─── Forms ──────────────────────────────────────────────────────── */
+  .input-morandi {
+    @apply w-full px-3 py-2 rounded-lg text-sm bg-morandi-page border border-morandi-border
+    text-morandi-text placeholder:text-morandi-text-muted focus-morandi focus:border-morandi-accent-light transition-morandi;
+  }
+  .select-morandi {
+    @apply w-full px-3 py-1.5 rounded-lg text-xs bg-morandi-page border border-morandi-border
+    text-morandi-text placeholder:text-morandi-text-muted focus-morandi focus:border-morandi-accent-light transition-morandi;
+  }
+  .section-title { @apply text-sm font-semibold text-morandi-text mb-3; }
+  .section-desc { @apply text-xs text-morandi-text-secondary mb-3; }
+  .section-label { @apply text-[11px] text-morandi-text-muted whitespace-nowrap; }
+  .field-label { @apply text-xs font-medium text-morandi-text-secondary uppercase tracking-wider; }
+
+  /* ─── Thumbnails & chips ─────────────────────────────────────────── */
+  .thumb-morandi {
+    @apply w-10 h-10 rounded-md bg-morandi-sidebar border border-morandi-border-light
+    flex items-center justify-center shrink-0 overflow-hidden;
+  }
+  .thumb-morandi-sm {
+    @apply w-9 h-9 rounded-md bg-morandi-sidebar border border-morandi-border-light
+    flex items-center justify-center shrink-0 overflow-hidden;
+  }
+  .chip-success {
+    @apply text-[10px] font-medium leading-none px-1.5 py-0.5 rounded-md
+    text-morandi-success bg-morandi-success/10 border border-morandi-success/20;
+  }
+  .chip-danger {
+    @apply text-[10px] font-medium leading-none px-1.5 py-0.5 rounded-md
+    text-morandi-danger bg-morandi-danger/10 border border-morandi-danger/20;
+  }
+  .chip-neutral {
+    @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-morandi
+    bg-morandi-sidebar/70 border border-morandi-border-light hover:bg-morandi-hover;
+  }
+  .banner-info {
+    @apply px-4 py-1.5 text-xs text-morandi-accent bg-morandi-accent/10 border-b border-morandi-border-light;
+  }
+  .banner-success {
+    @apply px-4 py-2 border-b text-xs font-medium bg-morandi-success/10 text-morandi-success border-morandi-success/20;
+  }
+  .banner-danger {
+    @apply px-4 py-2 border-b text-xs font-medium bg-morandi-danger/10 text-morandi-danger border-morandi-danger/20;
+  }
+  .callout-accent {
+    @apply text-xs text-morandi-text-secondary bg-morandi-accent-light/30 rounded-lg px-3 py-2 border border-morandi-accent/15;
+  }
+  .callout-warning {
+    @apply text-xs text-morandi-text-secondary bg-morandi-warning-light/30 rounded-lg px-3 py-2 border border-morandi-warning/15;
+  }
+  .link-accent {
+    @apply inline-flex items-center gap-2 text-sm text-morandi-accent hover:text-morandi-accent-hover transition-morandi hover:underline;
+  }
+  .code-block {
+    @apply text-morandi-text font-mono bg-morandi-sidebar px-2.5 py-1.5 rounded border border-morandi-border-light;
+  }
+  .code-block-sm {
+    @apply text-xs text-morandi-text font-mono bg-morandi-sidebar px-2.5 py-1.5 rounded border border-morandi-border-light;
+  }
+  .btn-morandi-accent-soft {
+    @apply flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-morandi
+    bg-morandi-accent-light/50 text-morandi-accent hover:bg-morandi-accent-light border border-morandi-accent/20
+    disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-morandi-warning-soft {
+    @apply flex items-center gap-1.5 shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-morandi
+    bg-morandi-warning-light/40 text-morandi-warning hover:bg-morandi-warning-light/60 border border-morandi-warning/20
+    disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .issue-list {
+    @apply rounded-lg border border-morandi-border-light px-3 bg-morandi-page/40;
+  }
+  .status-pill {
+    @apply flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs text-morandi-text-muted select-none;
+  }
+
+  /* ─── Segmented control (language toggle) ────────────────────────── */
+  .segment-control {
+    @apply inline-flex items-center rounded-lg bg-morandi-sidebar border border-morandi-border-light p-0.5;
+  }
+  .segment-item {
+    @apply px-2.5 py-1.5 rounded-md text-xs font-medium transition-morandi
+    text-morandi-text-muted hover:text-morandi-text;
+  }
+  .segment-item-active {
+    @apply bg-morandi-card text-morandi-text shadow-sm border border-morandi-border-light;
+  }
+
+  /* ─── Drag & misc ────────────────────────────────────────────────── */
+  .drag-overlay {
+    @apply bg-morandi-card rounded-lg shadow-morandi-lg border border-morandi-accent-light opacity-90 scale-[1.02];
+  }
+  .drag-handle {
+    @apply cursor-grab active:cursor-grabbing p-1 rounded-md transition-morandi
+    hover:bg-morandi-hover touch-none;
+  }
+  .drop-zone-accent { @apply bg-morandi-accent/5; }
+  .drop-zone-danger { @apply bg-morandi-danger/5; }
   .prerequisite-skeleton { @apply h-7 rounded bg-morandi-sidebar animate-pulse; }
+  .path-row {
+    @apply flex items-center gap-2 p-2.5 bg-morandi-page rounded-md border border-morandi-border-light;
+  }
+  .info-callout {
+    @apply bg-morandi-accent/10 rounded-lg p-4 border border-morandi-accent/15;
+  }
 }

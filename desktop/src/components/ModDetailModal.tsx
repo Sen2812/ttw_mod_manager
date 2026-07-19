@@ -1,15 +1,15 @@
 import { useT } from "../i18n";
 import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { useStore } from "../store";
 import type { Mod } from "../types";
 import ModRowTags from "./ModRowTags";
 import ConfirmDialog from "./ConfirmDialog";
 import { getModWorkshopTags } from "@core/mod-manager/category-utils";
-import { getModDisplayName, getModSourceType } from "@core/mod-manager/mod-display";
+import { getModDisplayName, getModSourceType, isLocalMod, isUsableWorkshopTitle, resolveModWorkshopId } from "@core/mod-manager/mod-display";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
-import { isLocalMod } from "@core/mod-manager/mod-display";
 
 interface ModDetailModalProps {
   mod: Mod;
@@ -20,12 +20,22 @@ interface ModDetailModalProps {
 
 export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLocal }: ModDetailModalProps) {
   const t = useT();
+  const setMods = useStore(s => s.setMods);
   const [copied, setCopied] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
   const updateStatus = getModUpdateStatus(mod);
   const canDeleteLocal = isLocalMod(mod) && !!onDeleteLocal;
+
+  useEffect(() => {
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId || isUsableWorkshopTitle(mod.humanName, workshopId)) return;
+    if (!window.api?.fetchWorkshopTitles) return;
+    void window.api.fetchWorkshopTitles([workshopId]).then((result) => {
+      if (result?.mods) setMods(result.mods);
+    }).catch(console.error);
+  }, [mod.name, mod.workshopId, mod.humanName, setMods]);
 
   const displayName = getModDisplayName(mod);
   const workshopUrl = /^\d{5,15}$/.test(mod.workshopId)
@@ -67,15 +77,16 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  return createPortal(
+    <>
+    <div className="modal-shell">
       <div className="modal-backdrop" onClick={onClose} />
       <div className="modal-panel w-[480px] max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-morandi-border-light">
-          <h2 className="text-base font-semibold text-morandi-text truncate pr-4">{displayName}</h2>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors shrink-0">
-            <X className="w-4 h-4 text-morandi-text-secondary" />
+        <div className="modal-header">
+          <h2 className="text-base font-semibold text-morandi-text truncate pr-4 flex-1">{displayName}</h2>
+          <button onClick={onClose} className="modal-close-btn">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -131,7 +142,7 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
               <InfoField label={t("moddetail.workshopPage")}>
                 <button
                   onClick={handleOpenWorkshop}
-                  className="inline-flex items-center gap-2 text-sm text-morandi-accent hover:text-morandi-accent-hover hover:underline"
+                  className="link-accent"
                 >
                   <ExternalLink className="w-4 h-4" />
                   {t("moddetail.viewOnWorkshop")}
@@ -213,7 +224,7 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
               <InfoField label={t("moddetail.workshopPrerequisites")}>
                 <div className="space-y-1">
                   {mod.reqModIdToName.map(([id, name], i) => (
-                    <div key={i} className="text-xs text-morandi-text bg-morandi-sidebar px-2 py-1 rounded flex justify-between gap-2">
+                    <div key={i} className="text-xs text-morandi-text code-block-sm flex justify-between gap-2">
                       <span className="truncate">{name}</span>
                       <span className="text-morandi-text-muted font-mono shrink-0">{id}</span>
                     </div>
@@ -226,7 +237,7 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
               <InfoField label={t("moddetail.dependencies")}>
                 <div className="space-y-1">
                   {mod.dependencyPacks.map((dep, i) => (
-                    <code key={i} className="block text-xs text-morandi-text font-mono bg-morandi-sidebar px-2 py-1 rounded">
+                    <code key={i} className="block code-block-sm">
                       {dep}
                     </code>
                   ))}
@@ -238,7 +249,7 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-morandi-border-light flex items-center justify-between">
+        <div className="modal-footer flex items-center justify-between">
           <div className="flex items-center gap-2">
             {workshopUrl && (
               <button onClick={handleOpenWorkshop} className="btn-morandi-ghost text-xs flex items-center gap-1.5">
@@ -283,6 +294,8 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
         />
       )}
     </div>
+    </>,
+    document.body,
   );
 }
 
@@ -290,7 +303,7 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
 function InfoField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="text-xs font-medium text-morandi-text-secondary uppercase tracking-wider">{label}</label>
+      <label className="field-label">{label}</label>
       <div className="mt-1">{children}</div>
     </div>
   );
@@ -304,13 +317,13 @@ function CopyableCode({ value, copied, onCopy, copyTitle, small, breakAll }: {
   return (
     <div className="flex items-center gap-2">
       <code className={clsx(
-        "flex-1 text-morandi-text font-mono bg-morandi-sidebar px-2.5 py-1.5 rounded",
+        "flex-1 code-block",
         small ? "text-xs" : "text-sm",
         breakAll && "break-all",
       )}>
         {value}
       </code>
-      <button onClick={onCopy} className="p-1.5 rounded hover:bg-morandi-hover transition-colors shrink-0" title={copyTitle}>
+      <button onClick={onCopy} className="icon-btn shrink-0" title={copyTitle}>
         {copied ? (
           <Check className="w-4 h-4 text-morandi-success" />
         ) : (

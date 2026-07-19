@@ -40,16 +40,12 @@ export interface Mod {
   size?: number;
   /** Workshop subscription timestamp */
   subbedTime?: number;
-  /** Merged mods metadata (if this is a merged pack) */
-  mergedModsData?: MergedModsData | null;
   /** Required mod IDs: [workshopId, humanName][] */
   reqModIdToName?: [string, string][];
   /** Required mod IDs (raw) */
   reqModIds?: string[];
   /** Pack dependency names */
   dependencyPacks?: string[];
-  /** User-assigned categories */
-  categories?: string[];
   /** Tags from Steam Workshop */
   tags: string[];
   /** Custom user-assigned tags */
@@ -61,32 +57,9 @@ export interface Mod {
   downloadBytesTotal?: number;
 }
 
-export interface MergedModsData {
-  mergedFrom: { name: string; path: string }[];
-}
-
-/** Mod data fetched from Steam Workshop API */
-export interface ModData {
-  workshopId: string;
-  humanName: string;
-  author: string;
-  reqModIdToName: [string, string][];
-  reqModIds: string[];
-  lastChanged: number;
-  subscriptionTime: number;
-  isDeleted: boolean;
-  tags: string[];
-}
-
 /** Preset - a saved configuration of mods */
 export interface Preset {
   name: string;
   mods: Mod[];
   version?: number;
-}
-
-/** Mod with its load order for import/export */
-export interface ModIdAndLoadOrder {
-  workshopId: string;
-  loadOrder?: number;
 }

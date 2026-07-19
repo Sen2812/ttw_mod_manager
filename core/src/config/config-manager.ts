@@ -8,26 +8,13 @@
  * written (debounced) whenever state changes.
  */
 
-import { GameFolderPaths, GamePresetsMap, Mod, Preset, SupportedGame } from "../types";
+import { GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
 
 // ─── Config Schema ────────────────────────────────────────────────────────────
 
 /** User preferences that persist across sessions */
 export interface UserPreferences {
-  areThumbnailsEnabled: boolean;
   isClosedOnPlay: boolean;
-  isAuthorEnabled: boolean;
-  isCompatCheckingVanillaPacks: boolean;
-  isMakeUnitsGeneralsEnabled: boolean;
-  isSkipIntroMoviesEnabled: boolean;
-  isScriptLoggingEnabled: boolean;
-  isAutoStartCustomBattleEnabled: boolean;
-  isChangingGameProcessPriority: boolean;
-  isFeaturesForModdersEnabled: boolean;
-  moddersPrefix: string;
-  modRowsSortingType: string;
-  currentLanguage?: string;
-  wasOnboardingEverRun: boolean;
 }
 
 /** The complete app configuration that gets persisted */
@@ -46,51 +33,24 @@ export interface AppConfig {
   gameDefaultPresets: Record<SupportedGame, Preset | undefined>;
   /** Mods that should always be enabled */
   alwaysEnabledMods: { name: string }[];
-  /** Mods hidden from the list */
-  hiddenMods: { name: string }[];
-  /** User-assigned categories */
-  categories: string[];
-  /** Category colors */
-  categoryColors: Record<string, string>;
-  /** Custom pack data overwrites */
-  packDataOverwrites: Record<string, any[]>;
-  /** User flow option overrides */
-  userFlowOptions: Record<string, Record<string, any>>;
 }
 
 /** Partial config for updates */
 export type AppConfigUpdate = Partial<AppConfig>;
 
-// ─── Default Config ───────────────────────────────────────────────────────────
+// ─── Default Config ─────────────────────────────────────────────────────────
 
 export function createDefaultConfig(currentGame: SupportedGame = "wh3"): AppConfig {
   return {
     currentGame,
     preferences: {
-      areThumbnailsEnabled: true,
       isClosedOnPlay: false,
-      isAuthorEnabled: true,
-      isCompatCheckingVanillaPacks: false,
-      isMakeUnitsGeneralsEnabled: false,
-      isSkipIntroMoviesEnabled: false,
-      isScriptLoggingEnabled: false,
-      isAutoStartCustomBattleEnabled: false,
-      isChangingGameProcessPriority: false,
-      isFeaturesForModdersEnabled: false,
-      moddersPrefix: "",
-      modRowsSortingType: "ordered",
-      wasOnboardingEverRun: false,
     },
     gameFolderPaths: {} as Record<SupportedGame, GameFolderPaths>,
     gamePresets: {} as Record<SupportedGame, Preset[]>,
     gameCurrentPreset: {} as Record<SupportedGame, Preset | undefined>,
     gameDefaultPresets: {} as Record<SupportedGame, Preset | undefined>,
     alwaysEnabledMods: [],
-    hiddenMods: [],
-    categories: [],
-    categoryColors: {},
-    packDataOverwrites: {},
-    userFlowOptions: {},
   };
 }
 

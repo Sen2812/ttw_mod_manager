@@ -95,62 +95,11 @@ export function sortAsInPreset(mods: Mod[], presetMods: Mod[]): Mod[] {
   });
 }
 
-/** Sort by human-readable name */
-export function sortByHumanName(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => collator.compare(a.humanName, b.humanName));
-}
-
-/** Sort by human name, falling back to internal name */
-export function sortByHumanNameOrName(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => {
-    const nameA = a.humanName || a.name;
-    const nameB = b.humanName || b.name;
-    return collator.compare(nameA, nameB);
-  });
-}
-
 /** Sort by enabled status (enabled first), then by name */
 export function sortByEnabled(mods: Mod[]): Mod[] {
   return [...mods].sort((a, b) => {
     if (a.isEnabled !== b.isEnabled) return a.isEnabled ? -1 : 1;
     return compareModNames(a.name, b.name);
-  });
-}
-
-/** Sort by author name */
-export function sortByAuthor(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => {
-    if (a.author === b.author) return compareModNames(a.name, b.name);
-    return collator.compare(a.author, b.author);
-  });
-}
-
-/** Sort by file size ascending */
-export function sortBySize(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => (a.size ?? 0) - (b.size ?? 0));
-}
-
-/** Sort by last updated time (most recent first) */
-export function sortByLastUpdated(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => {
-    const ta = a.lastChanged ?? a.lastChangedLocal;
-    const tb = b.lastChanged ?? b.lastChangedLocal;
-    if (ta === undefined && tb === undefined) return 0;
-    if (ta === undefined) return 1;
-    if (tb === undefined) return -1;
-    return tb - ta;
-  });
-}
-
-/** Sort by subscription time (most recent first) */
-export function sortBySubscribedTime(mods: Mod[]): Mod[] {
-  return [...mods].sort((a, b) => {
-    const ta = a.subbedTime ?? a.lastChanged ?? a.lastChangedLocal;
-    const tb = b.subbedTime ?? b.lastChanged ?? b.lastChangedLocal;
-    if (ta === undefined && tb === undefined) return 0;
-    if (ta === undefined) return 1;
-    if (tb === undefined) return -1;
-    return tb - ta;
   });
 }
 
