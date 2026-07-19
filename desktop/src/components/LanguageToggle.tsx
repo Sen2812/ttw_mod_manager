@@ -1,4 +1,4 @@
-import { useI18nStore } from "../i18n";
+import { useI18nStore, useT } from "../i18n";
 import { Languages } from "lucide-react";
 import clsx from "clsx";
 
@@ -7,6 +7,7 @@ import clsx from "clsx";
  * 用于 TopBar。带有 segmented control 风格。
  */
 export function LanguageToggle({ compact = false }: { compact?: boolean }) {
+  const t = useT();
   const locale = useI18nStore((s) => s.locale);
   const toggle = useI18nStore((s) => s.toggle);
 
@@ -16,7 +17,7 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
       <button
         onClick={toggle}
         className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-morandi-text-secondary hover:bg-morandi-hover transition-colors"
-        title={locale === "zh" ? "切换到 English" : "Switch to 中文"}
+        title={locale === "zh" ? t("topbar.switchToEnglish") : t("topbar.switchToChinese")}
       >
         <Languages className="w-3.5 h-3.5" />
         <span>{locale === "zh" ? "中" : "EN"}</span>
@@ -33,6 +34,7 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
           "px-3 py-1 rounded-md text-xs font-medium transition-all",
           locale === "zh" ? "bg-morandi-card text-morandi-text shadow-sm" : "text-morandi-text-muted hover:text-morandi-text",
         )}
+        title={t("topbar.switchToChinese")}
       >
         中文
       </button>
@@ -42,6 +44,7 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
           "px-3 py-1 rounded-md text-xs font-medium transition-all",
           locale === "en" ? "bg-morandi-card text-morandi-text shadow-sm" : "text-morandi-text-muted hover:text-morandi-text",
         )}
+        title={t("topbar.switchToEnglish")}
       >
         English
       </button>

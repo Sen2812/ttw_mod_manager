@@ -4,24 +4,21 @@ import { useState } from "react";
 import clsx from "clsx";
 import { useStore } from "../store";
 import type { Mod } from "../types";
-import ModCategorySelect from "./ModCategorySelect";
+import ModRowTags from "./ModRowTags";
 import ConfirmDialog from "./ConfirmDialog";
-import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
-import { getModDisplayName } from "@core/mod-manager/mod-display";
+import { getModWorkshopTags } from "@core/mod-manager/category-utils";
+import { getModDisplayName, getModSourceType } from "@core/mod-manager/mod-display";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
-import { isLocalMod } from "@core/mod-manager/local-pack-import";
+import { isLocalMod } from "@core/mod-manager/mod-display";
 
 interface ModDetailModalProps {
   mod: Mod;
   onClose: () => void;
-  categories: string[];
-  onCategoryChange: (modName: string, category: string | null) => void;
-  onAddCategory: (name: string) => void;
   onShowUpdate?: (modName: string) => void;
   onDeleteLocal?: (mod: Mod) => void;
 }
 
-export default function ModDetailModal({ mod, onClose, categories, onCategoryChange, onAddCategory, onShowUpdate, onDeleteLocal }: ModDetailModalProps) {
+export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLocal }: ModDetailModalProps) {
   const t = useT();
   const [copied, setCopied] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
@@ -172,13 +169,11 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
               )}
             </div>
 
-            <InfoField label={t("category.workshopCategory")}>
-              <ModCategorySelect
-                value={getModCategory(mod)}
-                categories={categories}
-                workshopTags={normalizeWorkshopTags(mod.tags)}
-                onChange={(cat) => onCategoryChange(mod.name, cat)}
-                onAddCategory={onAddCategory}
+            <InfoField label={t("category.workshopTags")}>
+              <ModRowTags
+                variant="detail"
+                source={getModSourceType(mod)}
+                workshopTags={getModWorkshopTags(mod)}
               />
             </InfoField>
 
@@ -239,17 +234,6 @@ export default function ModDetailModal({ mod, onClose, categories, onCategoryCha
               </InfoField>
             )}
 
-            {mod.tags && mod.tags.length > 0 && (
-              <InfoField label={t("category.workshopTags")}>
-                <div className="flex flex-wrap gap-1">
-                  {mod.tags.map((tag, i) => (
-                    <span key={i} className="text-xs bg-morandi-sidebar text-morandi-text-secondary px-2 py-0.5 rounded">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </InfoField>
-            )}
           </div>
         </div>
 

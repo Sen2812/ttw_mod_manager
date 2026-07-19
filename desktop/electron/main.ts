@@ -95,7 +95,6 @@ function buildBootstrapPayload() {
     profileFilterModes: ui.profileFilterModes ?? {},
     modFilterMode: ui.modFilterMode ?? "all",
     subscribedWorkshopIds: mm.subscribedWorkshopIds,
-    categories: mm.getCategories(),
     dataDir,
     mods: mm.getMods(),
     preferences: {
@@ -127,7 +126,6 @@ function notifyModsUpdated(): void {
   mainWindow.webContents.send("mods-updated", {
     mods: mm.getMods(),
     subscribedWorkshopIds: mm.subscribedWorkshopIds,
-    categories: mm.getCategories(),
     outdatedCount: countOutdatedMods(mm.getMods()),
   });
 }
@@ -145,17 +143,17 @@ function notifyPrerequisitesCheckDone(modName: string): void {
 /** Run prerequisite fetch in background so toggle/enable IPC returns immediately. */
 function runModPrerequisitesCheck(modName: string): void {
   void (async () => {
-    if (!(await isSteamIpcAvailable())) return;
-
-    notifyPrerequisitesCheckStarted(modName);
-    try {
-      await mm.ensureModPrerequisites(modName);
-      notifyModsUpdated();
-    } catch (e) {
-      appLog(`Prerequisites check failed for ${modName}: ${e}`);
-    } finally {
-      notifyPrerequisitesCheckDone(modName);
+    const steamOk = await isSteamIpcAvailable();
+    if (steamOk) {
+      notifyPrerequisitesCheckStarted(modName);
+      try {
+        await mm.ensureModPrerequisites(modName);
+        notifyModsUpdated();
+      } catch (e) {
+        appLog(`Prerequisites check failed for ${modName}: ${e}`);
+      }
     }
+    notifyPrerequisitesCheckDone(modName);
   })();
 }
 
@@ -629,7 +627,6 @@ function registerIpc() {
       profileFilterModes: ui.profileFilterModes ?? {},
       modFilterMode: ui.modFilterMode ?? "all",
       subscribedWorkshopIds: mm.subscribedWorkshopIds,
-      categories: mm.getCategories(),
       dataDir,
       preferences: {
         isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
@@ -743,33 +740,24 @@ function registerIpc() {
     await ensureInit();
     const mods = mm.getMods();
     const map = new Map(mods.map(m => [m.name, m]));
-    // names 是前端显示顺序（从上到下）。
+    const orderedSet = new Set(names);
+    // names 是前端 profile 显示顺序（从上到下）。
     // loadOrder 升序：列表顶部 = loadOrder 0 = 先加载 = 优先级最低；
     // 列表底部 = 最高 loadOrder = 后加载 = 覆盖上方。
     names.forEach((name, i) => {
       const m = map.get(name);
       if (m) m.loadOrder = i;
     });
-    // 重新排序数组
+    if (names.length < mods.length) {
+      let nextOrder = names.length;
+      for (const m of mods) {
+        if (!orderedSet.has(m.name)) {
+          m.loadOrder = nextOrder++;
+        }
+      }
+    }
     mm.mods = sortByLoadOrder(mm.mods);
     return mm.getMods();
-  });
-
-  // ── 分类 ─────────────────────────────────────────────────────────────────
-  ipcMain.handle("get-categories", async () => {
-    await ensureInit();
-    return mm.getCategories();
-  });
-  ipcMain.handle("set-mod-category", async (_e, modName: string, category: string | null) => {
-    await ensureInit();
-    mm.setModCategory(modName, category);
-    mm.syncCategoryRegistry();
-    return { mods: mm.getMods(), categories: mm.getCategories() };
-  });
-  ipcMain.handle("add-custom-category", async (_e, name: string) => {
-    await ensureInit();
-    mm.addCustomCategory(name);
-    return mm.getCategories();
   });
 
   // ── 工坊更新 ─────────────────────────────────────────────────────────────

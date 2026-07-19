@@ -61,7 +61,7 @@ export function findModDataFile(launcherFolder: string = getDefaultLauncherFolde
   }
 }
 
-/** Read CA launcher display names keyed by lowercased pack file name. */
+/** Read CA launcher display names keyed by lowercased pack/uuid identifiers. */
 export function readLauncherModNameIndex(
   launcherGameId: string,
   launcherFolder?: string,
@@ -71,12 +71,40 @@ export function readLauncherModNameIndex(
     if (entry.game !== launcherGameId) continue;
     const name = entry.name?.trim();
     if (!name) continue;
-    index.set(entry.uuid.toLowerCase(), {
+    const value = {
       name,
       short: entry.short?.trim() || undefined,
-    });
+    };
+    const keys = new Set<string>([entry.uuid.toLowerCase()]);
+    const packBase = entry.packfile?.split(/[/\\]/).pop()?.toLowerCase();
+    if (packBase) keys.add(packBase);
+    const uuidNoExt = entry.uuid.toLowerCase().replace(/\.pack$/i, "");
+    if (uuidNoExt) keys.add(uuidNoExt);
+    for (const key of keys) index.set(key, value);
   }
   return index;
+}
+
+/** Resolve a launcher display name for a mod (pack name, workshop id, etc.). */
+export function lookupLauncherModName(
+  index: Map<string, { name: string; short?: string }>,
+  mod: Pick<Mod, "name" | "workshopId">,
+): string | undefined {
+  const keys = new Set<string>([mod.name.toLowerCase()]);
+  const workshopId = mod.workshopId?.trim();
+  if (workshopId) {
+    keys.add(workshopId.toLowerCase());
+    keys.add(`${workshopId}.pack`.toLowerCase());
+  }
+  const stem = mod.name.toLowerCase().replace(/\.pack$/i, "");
+  if (stem) keys.add(stem);
+
+  for (const key of keys) {
+    const entry = index.get(key);
+    const title = entry?.name?.trim() || entry?.short?.trim();
+    if (title) return title;
+  }
+  return undefined;
 }
 
 /** Read all entries from moddata.dat. Returns [] if the file doesn't exist. */

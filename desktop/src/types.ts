@@ -31,7 +31,6 @@ export interface AppConfigResponse {
   currentPresetName: string;
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
   subscribedWorkshopIds?: string[];
-  categories?: string[];
   dataDir?: string;
   preferences?: { isClosedOnPlay: boolean };
 }
@@ -45,7 +44,6 @@ export interface BootstrapResponse extends AppConfigResponse {
 export interface ModsUpdatedPayload {
   mods: Mod[];
   subscribedWorkshopIds: string[];
-  categories: string[];
   outdatedCount: number;
 }
 
@@ -170,9 +168,6 @@ declare global {
       setUnsavedChanges: (hasChanges: boolean) => Promise<{ ok: boolean }>;
       hasUnsavedChanges: () => Promise<boolean>;
       analyzeOverwrites: () => Promise<OverwriteAnalysis>;
-      getCategories: () => Promise<string[]>;
-      setModCategory: (modName: string, category: string | null) => Promise<{ mods: Mod[]; categories: string[] }>;
-      addCustomCategory: (name: string) => Promise<string[]>;
       checkModUpdates: (force?: boolean) => Promise<{ mods: Mod[]; outdatedCount: number }>;
       forceUpdateMod: (modName: string) => Promise<{
         ok: boolean;

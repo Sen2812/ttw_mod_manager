@@ -6,6 +6,9 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Mod } from "../types";
 import type { LogCallback } from "./mod-discovery";
+import { isLocalMod } from "./mod-display";
+
+export { isLocalMod };
 
 export type LocalPackSkipReason = "NOT_PACK" | "VANILLA_PACK";
 
@@ -30,11 +33,6 @@ export interface DeleteLocalModResult {
   ok: boolean;
   error?: "NOT_FOUND" | "NOT_LOCAL_MOD" | "VANILLA_PACK" | "NO_GAME_PATH" | "DELETE_FAILED";
   message?: string;
-}
-
-/** Mods under the game data/ folder (data/ or data/modding/), not Workshop content. */
-export function isLocalMod(mod: Pick<Mod, "isInData">): boolean {
-  return mod.isInData === true;
 }
 
 function copyThumbnails(sourcePackPath: string, fileName: string, dataFolder: string): void {

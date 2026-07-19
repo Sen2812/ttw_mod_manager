@@ -25,7 +25,6 @@ import {
 } from "./mod-sorting";
 import {
   seedModCategoryFromTags,
-  collectCategoriesFromMods,
 } from "./category-utils";
 import {
   createPreset,
@@ -226,7 +225,6 @@ export class ModManager {
     this.mods = sortByLoadOrder(this.mods);
 
     for (const mod of this.mods) seedModCategoryFromTags(mod);
-    this.syncCategoryRegistry();
 
     this.log(`Loaded ${this.mods.length} mods (${this.mods.filter((m) => m.isEnabled).length} enabled)`);
     return this.mods;
@@ -244,7 +242,6 @@ export class ModManager {
     );
     this.mods = sortByLoadOrder(this.mods);
     for (const mod of this.mods) seedModCategoryFromTags(mod);
-    this.syncCategoryRegistry();
   }
 
   /** Load presets and restore the current preset state */
@@ -307,7 +304,6 @@ export class ModManager {
           mod.humanName = presetMod.humanName;
         }
         if (presetMod.author) mod.author = presetMod.author;
-        if (presetMod.categories) mod.categories = presetMod.categories;
       } else {
         // Mod not in preset, disable it
         mod.isEnabled = false;
@@ -545,6 +541,10 @@ export class ModManager {
     }
     
     mod.isEnabled = true;
+    const maxOrder = this.mods
+      .filter((m) => m.isEnabled && m.name !== modName)
+      .reduce((max, m) => Math.max(max, m.loadOrder ?? -1), -1);
+    mod.loadOrder = maxOrder + 1;
   }
   
   /** Check if all dependencies for a mod are available */
@@ -634,33 +634,6 @@ export class ModManager {
     this.saveConfig();
   }
 
-  // ─── Category Management ────────────────────────────────────────────────
-
-  /** Merge mod + custom categories into config.categories. */
-  syncCategoryRegistry(): void {
-    const merged = new Set([...this.config.categories, ...collectCategoriesFromMods(this.mods)]);
-    this.config.categories = [...merged].sort((a, b) =>
-      a.localeCompare(b, undefined, { sensitivity: "base" }),
-    );
-  }
-
-  /** Set the primary category for one mod (null = clear). */
-  setModCategory(modName: string, category: string | null): void {
-    const mod = this.mods.find((m) => m.name === modName);
-    if (!mod) return;
-    const trimmed = category?.trim();
-    mod.categories = trimmed ? [trimmed] : [];
-    if (trimmed) this.registerCategory(trimmed);
-  }
-
-  /** Register a custom category name globally. */
-  addCustomCategory(category: string): string[] {
-    const trimmed = category.trim();
-    if (!trimmed) return this.config.categories;
-    this.registerCategory(trimmed);
-    return this.config.categories;
-  }
-
   // ─── Workshop Updates ───────────────────────────────────────────────────
 
   /** Refresh workshop version timestamps and return mods with outdated count. */
@@ -697,60 +670,14 @@ export class ModManager {
     return { updated, failed, mods: this.mods };
   }
 
-  private registerCategory(category: string): void {
-    if (!this.config.categories.includes(category)) {
-      this.config.categories.push(category);
-      this.config.categories.sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: "base" }),
-      );
-      this.saveConfig();
-    }
-  }
-
-  /** Add a category to mods */
-  addCategory(modNames: string[], category: string): void {
-    const nameSet = new Set(modNames);
-    for (const mod of this.mods) {
-      if (nameSet.has(mod.name)) {
-        if (!mod.categories) mod.categories = [];
-        if (!mod.categories.includes(category)) {
-          mod.categories.push(category);
-        }
-      }
-    }
-    if (!this.config.categories.includes(category)) {
-      this.config.categories.push(category);
-    }
-  }
-
-  /** Remove a category from mods */
-  removeCategory(modNames: string[], category: string): void {
-    const nameSet = new Set(modNames);
-    for (const mod of this.mods) {
-      if (nameSet.has(mod.name) && mod.categories) {
-        mod.categories = mod.categories.filter((c) => c !== category);
-      }
-    }
-    // Remove category if no mods use it
-    if (!this.mods.some((m) => m.categories?.includes(category))) {
-      this.config.categories = this.config.categories.filter((c) => c !== category);
-    }
-  }
-
-  /** Get all categories */
-  getCategories(): string[] {
-    return this.config.categories;
-  }
-
   /** Sync renderer mod state into memory (does not persist). */
-  syncModsFromClient(mods: Pick<Mod, "name" | "isEnabled" | "loadOrder" | "categories">[]): void {
+  syncModsFromClient(mods: Pick<Mod, "name" | "isEnabled" | "loadOrder">[]): void {
     const map = new Map(this.mods.map(m => [m.name, m]));
     for (const m of mods) {
       const cm = map.get(m.name);
       if (!cm) continue;
       cm.isEnabled = m.isEnabled;
       cm.loadOrder = m.loadOrder;
-      if (m.categories) cm.categories = m.categories;
     }
     this.mods = sortByLoadOrder(this.mods);
   }

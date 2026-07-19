@@ -41,8 +41,6 @@ export default function TopBar() {
         useStore.setState({
           originalMods: result.mods,
           subscribedWorkshopIds: result.subscribedWorkshopIds ?? [],
-          categories: await window.api.getCategories(),
-          categoryFilter: null,
         });
         // 工坊元数据/更新检查由主进程后台 enrich 完成后通过 onModsUpdated 推送
         markClean();
