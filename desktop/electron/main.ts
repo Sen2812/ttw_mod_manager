@@ -9,6 +9,11 @@ import { SupportedGame, Mod, Preset } from "../../core/src";
 import { findSteamPath as coreFindSteamPath } from "../../core/src/mod-manager/mod-discovery";
 import { syncModsToLauncher } from "../../core/src/launcher/launcher-sync";
 import { generateUsedModsContent } from "../../core/src/launcher/used-mods";
+import {
+  START_GAME_PACK_DIR,
+  START_GAME_PACK_NAME,
+  writeSkipIntroPack,
+} from "../../core/src/launcher/start-game-pack";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
@@ -88,7 +93,11 @@ function buildBootstrapPayload() {
   const ui = loadUiState();
   return {
     currentGame: mm.config.currentGame,
-    games: BUILTIN_GAMES.map(g => ({ id: g.id, name: g.displayName })),
+    games: BUILTIN_GAMES.map(g => ({
+      id: g.id,
+      name: g.displayName,
+      supportedOptions: g.supportedOptions,
+    })),
     presets: mm.getPresets(),
     currentPresetName: mm.getActivePresetName(),
     folderPaths: mm.folderPaths,
@@ -99,6 +108,7 @@ function buildBootstrapPayload() {
     mods: mm.getMods(),
     preferences: {
       isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+      isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
     },
   };
 }
@@ -620,7 +630,11 @@ function registerIpc() {
     const ui = loadUiState();
     return {
       currentGame: mm.config.currentGame,
-      games: BUILTIN_GAMES.map(g => ({ id: g.id, name: g.displayName })),
+      games: BUILTIN_GAMES.map(g => ({
+      id: g.id,
+      name: g.displayName,
+      supportedOptions: g.supportedOptions,
+    })),
       presets: mm.getPresets(),
       currentPresetName: mm.getActivePresetName(),
       folderPaths: mm.folderPaths,
@@ -638,13 +652,20 @@ function registerIpc() {
     await ensureInit();
     return {
       isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+      isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
     };
   });
 
-  ipcMain.handle("set-preferences", async (_e, patch: { isClosedOnPlay?: boolean }) => {
+  ipcMain.handle("set-preferences", async (_e, patch: {
+    isClosedOnPlay?: boolean;
+    isSkipIntroMoviesEnabled?: boolean;
+  }) => {
     await ensureInit();
     if (typeof patch.isClosedOnPlay === "boolean") {
       mm.config.preferences.isClosedOnPlay = patch.isClosedOnPlay;
+    }
+    if (typeof patch.isSkipIntroMoviesEnabled === "boolean") {
+      mm.config.preferences.isSkipIntroMoviesEnabled = patch.isSkipIntroMoviesEnabled;
     }
     mm.saveConfig();
     await mm.flush();
@@ -652,6 +673,7 @@ function registerIpc() {
       ok: true,
       preferences: {
         isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
+        isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
       },
     };
   });
@@ -1105,6 +1127,25 @@ function registerIpc() {
       if (!dataFolder) return { error: "Data folder not found" };
 
       const enabledMods = mm.getEnabledMods();
+      const skipIntro = mm.config.preferences.isSkipIntroMoviesEnabled ?? false;
+      const supportsSkipIntro = game.supportedOptions.includes("SkipIntroMovies") && game.introMovies.length > 0;
+
+      let startGamePack: { workDir: string; packName: string } | undefined;
+      if (skipIntro && supportsSkipIntro) {
+        const tempPackDir = path.join(dataDir, START_GAME_PACK_DIR);
+        const tempPackPath = path.join(tempPackDir, START_GAME_PACK_NAME);
+        try {
+          writeSkipIntroPack(tempPackPath, {
+            packHeader: game.packHeader,
+            introMoviePaths: game.introMovies,
+            supportsCompression: game.supportsCompression,
+          });
+          startGamePack = { workDir: tempPackDir, packName: START_GAME_PACK_NAME };
+          console.log(`[launcher] Wrote skip-intro pack to ${tempPackPath}`);
+        } catch (e: any) {
+          console.error(`[launcher] Failed to write skip-intro pack:`, e.message);
+        }
+      }
 
       // ── 1. 生成 used_mods.txt 内容 ──
       // UI 列表越靠下优先级越高；写入 used_mods.txt / moddata 时会映射为
@@ -1113,7 +1154,7 @@ function registerIpc() {
       const { text: usedModsText, modsToCopyToData } = generateUsedModsContent(
         enabledMods,
         dataFolder,
-        isLinux,
+        { isLinux, startGamePack },
       );
 
       // ── 2. 复制 data/modding/ 的 mod 到 data/ 目录 ──

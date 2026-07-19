@@ -10,7 +10,7 @@ interface AppState {
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
   activePresetName: string | null;
   isScanning: boolean; isLaunching: boolean; isDirty: boolean; isSaving: boolean;
-  showGameMenu: boolean; showNewPresetModal: boolean; showSettingsPage: boolean; showCompatPanel: boolean;
+  showGameMenu: boolean; showNewPresetModal: boolean; showSettingsPage: boolean; showFeaturesPage: boolean; showCompatPanel: boolean;
   /** 覆盖详情弹窗聚焦的 mod 名 */
   compatFocusMod: string | null;
   /** 实时覆盖统计：modName → {wins, losses, total}。仅包含有冲突的 mod */
@@ -40,6 +40,7 @@ interface AppState {
   setIsScanning: (v: boolean) => void; setIsLaunching: (v: boolean) => void;
   setShowGameMenu: (v: boolean) => void; setShowNewPresetModal: (v: boolean) => void;
   setShowSettingsPage: (v: boolean) => void;
+  setShowFeaturesPage: (v: boolean) => void;
   /** 打开单个 mod 的覆盖详情弹窗 */
   openCompatPanel: (focusMod: string) => void;
   closeCompatPanel: () => void;
@@ -66,7 +67,7 @@ interface AppState {
 export const useStore = create<AppState>((set, get) => ({
   mods: [], presets: [], games: [], currentGame: "wh3", folderPaths: undefined,
   activePresetName: null, isScanning: false, isLaunching: false, isDirty: false, isSaving: false,
-  showGameMenu: false, showNewPresetModal: false, showSettingsPage: false, showCompatPanel: false,
+  showGameMenu: false, showNewPresetModal: false, showSettingsPage: false, showFeaturesPage: false, showCompatPanel: false,
   compatFocusMod: null, overwriteStats: null, overwriteAnalysis: null, overwriteAnalysisKey: null,
   originalMods: [], subscribedWorkshopIds: [],
   dependencyFocusMod: null, showDependencyModal: false,
@@ -86,6 +87,7 @@ export const useStore = create<AppState>((set, get) => ({
   setShowGameMenu: (showGameMenu) => set({ showGameMenu }),
   setShowNewPresetModal: (showNewPresetModal) => set({ showNewPresetModal }),
   setShowSettingsPage: (showSettingsPage) => set({ showSettingsPage }),
+  setShowFeaturesPage: (showFeaturesPage) => set({ showFeaturesPage }),
   openCompatPanel: (focusMod) => set({ showCompatPanel: true, compatFocusMod: focusMod }),
   closeCompatPanel: () => set({
     showCompatPanel: false,

@@ -15,6 +15,8 @@ import { GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
 /** User preferences that persist across sessions */
 export interface UserPreferences {
   isClosedOnPlay: boolean;
+  /** Replace intro cinematics with empty stubs on launch (when supported). */
+  isSkipIntroMoviesEnabled: boolean;
 }
 
 /** The complete app configuration that gets persisted */
@@ -45,6 +47,7 @@ export function createDefaultConfig(currentGame: SupportedGame = "wh3"): AppConf
     currentGame,
     preferences: {
       isClosedOnPlay: false,
+      isSkipIntroMoviesEnabled: false,
     },
     gameFolderPaths: {} as Record<SupportedGame, GameFolderPaths>,
     gamePresets: {} as Record<SupportedGame, Preset[]>,
@@ -132,7 +135,15 @@ export class ConfigManager {
       const raw = await this.io.read();
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppConfig>;
-        this.cache = { ...createDefaultConfig(currentGame), ...parsed };
+        const defaults = createDefaultConfig(currentGame);
+        this.cache = {
+          ...defaults,
+          ...parsed,
+          preferences: {
+            ...defaults.preferences,
+            ...parsed.preferences,
+          },
+        };
         return this.cache;
       }
     } catch (e) {
