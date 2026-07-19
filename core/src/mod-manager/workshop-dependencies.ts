@@ -58,17 +58,37 @@ function decodeWorkshopHtmlEntities(value: string): string {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
+/** Resolve Steam Workshop page language from environment (schinese for zh locales). */
+export function resolveSteamWorkshopLanguage(): string {
+  const candidates = [
+    process.env.STEAM_WORKSHOP_LANG,
+    process.env.LANG,
+    process.env.LANGUAGE,
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().locale : undefined,
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const lower = raw.toLowerCase();
+    if (lower.includes("zh")) return "schinese";
+    if (lower.startsWith("en")) return "english";
+  }
+  return "english";
+}
+
 /** Fetch a workshop item page (used for missing display titles only). */
-export async function fetchWorkshopHtml(workshopId: string): Promise<string> {
+export async function fetchWorkshopHtml(
+  workshopId: string,
+  language = resolveSteamWorkshopLanguage(),
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
         hostname: "steamcommunity.com",
-        path: `/sharedfiles/filedetails/?id=${workshopId}&l=english`,
+        path: `/sharedfiles/filedetails/?id=${workshopId}&l=${encodeURIComponent(language)}`,
         method: "GET",
         headers: {
           "User-Agent": USER_AGENT,
-          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Language": language === "schinese" ? "zh-CN,zh;q=0.9" : "en-US,en;q=0.9",
           Cookie: WORKSHOP_COOKIE,
         },
       },

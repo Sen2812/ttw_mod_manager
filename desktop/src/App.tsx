@@ -9,12 +9,11 @@ import SettingsPage from "./components/SettingsPage";
 import CompatPanel from "./components/CompatPanel";
 import ModDependencyModal from "./components/ModDependencyModal";
 import ModUpdateModal from "./components/ModUpdateModal";
-import DependencyAlertModal from "./components/DependencyAlertModal";
 import ConfirmDialog from "./components/ConfirmDialog";
 import type { BootstrapResponse, Mod, ModsUpdatedPayload } from "./types";
 
 function applyModsPayload(
-  payload: { mods?: Mod[]; subscribedWorkshopIds?: string[]; categories?: string[] },
+  payload: { mods?: Mod[]; subscribedWorkshopIds?: string[] },
   setMods: (m: Mod[]) => void,
 ) {
   if (!Array.isArray(payload.mods)) return;
@@ -22,7 +21,6 @@ function applyModsPayload(
   useStore.setState({
     originalMods: payload.mods,
     subscribedWorkshopIds: payload.subscribedWorkshopIds ?? [],
-    ...(payload.categories ? { categories: payload.categories } : {}),
   });
 }
 
@@ -36,7 +34,6 @@ async function loadBootstrapData(): Promise<BootstrapResponse> {
     ...config,
     mods: scan.mods,
     subscribedWorkshopIds: scan.subscribedWorkshopIds,
-    categories: config.categories ?? (await api.getCategories()),
   };
 }
 
@@ -131,7 +128,6 @@ function AppShell() {
       <CompatPanel />
       <ModDependencyModal />
       <ModUpdateModal />
-      <DependencyAlertModal />
 
       <ConfirmDialog
         open={showCloseConfirm}

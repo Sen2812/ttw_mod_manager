@@ -38,6 +38,18 @@ export function applyWorkshopTitle(mod: Mod, title: string | undefined): boolean
   return true;
 }
 
+/** Whether the mod lives under the game data/ tree (local pack, not Workshop content). */
+export function isLocalMod(mod: Pick<Mod, "isInData">): boolean {
+  return mod.isInData === true;
+}
+
+export type ModSourceType = "local" | "workshop";
+
+/** Local packs in data/modding vs Steam Workshop content folder. */
+export function getModSourceType(mod: Pick<Mod, "isInData">): ModSourceType {
+  return isLocalMod(mod) ? "local" : "workshop";
+}
+
 /** Resolve a mod's numeric Steam Workshop ID from workshopId or pack file name. */
 export function resolveModWorkshopId(mod: Pick<Mod, "workshopId" | "name">): string | undefined {
   const workshopId = mod.workshopId;

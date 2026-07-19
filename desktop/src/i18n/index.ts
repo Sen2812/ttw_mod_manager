@@ -65,3 +65,16 @@ export function useT(): TFunc {
     return text;
   };
 }
+
+function workshopTagDictKey(tag: string): string {
+  const normalized = tag.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+  return normalized ? `workshopTag.${normalized}` : "";
+}
+
+/** Translate a Steam Workshop tag when a locale entry exists; otherwise return the original tag. */
+export function translateWorkshopTag(tag: string, locale?: Locale): string {
+  const key = workshopTagDictKey(tag);
+  if (!key) return tag;
+  const loc = locale ?? useI18nStore.getState().locale;
+  return DICTS[loc][key] ?? DICTS.zh[key] ?? tag;
+}

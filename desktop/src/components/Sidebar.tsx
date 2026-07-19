@@ -3,9 +3,18 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import { useViewModeStore } from "../viewModeStore";
 import ConfirmDialog from "./ConfirmDialog";
-import { Plus, Trash2, RefreshCw, Save, Loader2, Star, Pencil, Check, X, Download, Upload } from "lucide-react";
+import { Plus, Trash2, RefreshCw, Save, Loader2, Star, Pencil, Check, X, Download, Upload, ChevronLeft, ChevronRight } from "lucide-react";
 import clsx from "clsx";
-import { scanEnabledDependencyReports } from "../utils/dependency-actions";
+
+const SIDEBAR_COLLAPSED_KEY = "ttw-sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /** 统计一个 preset/mod 列表中已启用的数量 */
 function countEnabled(mods: { isEnabled: boolean }[]): number {
@@ -33,7 +42,7 @@ export default function Sidebar() {
   const { presets, activePresetName, setActivePresetName, setShowNewPresetModal,
     setMods, setPresets, enabledCount, totalCount, originalTotalCount,
     isDirty, isSaving, saveCurrentState, markClean, markDirty, currentGame, mods,
-    subscribedWorkshopIds, openDependencyAlert, saveError } = useStore();
+    saveError } = useStore();
   const [presetToDelete, setPresetToDelete] = useState<string | null>(null);
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [importResultMsg, setImportResultMsg] = useState<string | null>(null);
@@ -43,7 +52,20 @@ export default function Sidebar() {
   const [renamingPreset, setRenamingPreset] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed);
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleCollapsed = () => {
+    setCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // 聚焦并全选重命名输入框
   useEffect(() => {
@@ -53,11 +75,6 @@ export default function Sidebar() {
     }
   }, [renamingPreset]);
 
-  const notifyDependencyIssues = (nextMods: typeof mods) => {
-    const reports = scanEnabledDependencyReports(nextMods, subscribedWorkshopIds);
-    if (reports.length > 0) openDependencyAlert(reports, { force: true });
-  };
-
   const doApply = async (name: string) => {
     const result = await window.api.applyPreset(name);
     if (Array.isArray(result)) {
@@ -66,7 +83,6 @@ export default function Sidebar() {
       setPresets(await window.api.getPresets());
       markClean();
       useStore.setState({ originalMods: result });
-      notifyDependencyIssues(result);
     }
   };
 
@@ -133,7 +149,6 @@ export default function Sidebar() {
       if (result.mods) {
         setMods(result.mods);
         markDirty();
-        notifyDependencyIssues(result.mods);
       }
       if (result.applied !== undefined) {
         setImportResultMsg(t("sidebar.importResult", {
@@ -198,14 +213,68 @@ export default function Sidebar() {
     : countEnabled(presets.find((p) => p.name === "Default")?.mods ?? []);
 
   return (
-    <div className="w-56 bg-morandi-sidebar border-r border-morandi-border-light flex flex-col shrink-0">
-      <div className="px-4 pt-4 pb-2 flex items-center justify-between">
-        <h2 className="text-xs font-semibold text-morandi-text-secondary uppercase tracking-wider">{t("sidebar.profiles")}</h2>
-        <button onClick={() => setShowNewPresetModal(true)}
-          className="p-1 rounded hover:bg-morandi-hover transition-colors"
-          title={t("newPreset.title")}>
-          <Plus className="w-3.5 h-3.5 text-morandi-text-secondary" />
-        </button>
+    <div className={clsx(
+      "bg-morandi-sidebar border-r border-morandi-border-light flex flex-col shrink-0 transition-[width] duration-200 overflow-hidden",
+      collapsed ? "w-11" : "w-56",
+    )}>
+      {collapsed ? (
+        <div className="flex flex-col items-center h-full py-3 gap-3">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="p-1.5 rounded-lg hover:bg-morandi-hover transition-colors"
+            title={t("sidebar.expandProfiles")}
+            aria-label={t("sidebar.expandProfiles")}
+          >
+            <ChevronRight className="w-4 h-4 text-morandi-text-secondary" />
+          </button>
+          <div className="flex-1 min-h-0" />
+          <button
+            type="button"
+            onClick={saveCurrentState}
+            disabled={!isDirty || isSaving}
+            className={clsx(
+              "relative p-1.5 rounded-lg transition-colors shrink-0",
+              isDirty
+                ? "text-morandi-accent hover:bg-morandi-hover"
+                : "text-morandi-text-muted cursor-not-allowed opacity-50",
+            )}
+            title={t("sidebar.saveChanges")}
+            aria-label={t("sidebar.saveChanges")}
+          >
+            {isSaving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            {isDirty && !isSaving && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-morandi-accent" />
+            )}
+          </button>
+        </div>
+      ) : (
+        <>
+      <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-1">
+        <h2 className="text-xs font-semibold text-morandi-text-secondary uppercase tracking-wider truncate">{t("sidebar.profiles")}</h2>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowNewPresetModal(true)}
+            className="p-1 rounded hover:bg-morandi-hover transition-colors"
+            title={t("newPreset.title")}
+          >
+            <Plus className="w-3.5 h-3.5 text-morandi-text-secondary" />
+          </button>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className="p-1 rounded hover:bg-morandi-hover transition-colors"
+            title={t("sidebar.collapseProfiles")}
+            aria-label={t("sidebar.collapseProfiles")}
+          >
+            <ChevronLeft className="w-3.5 h-3.5 text-morandi-text-secondary" />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
         {/* Default Profile */}
@@ -373,6 +442,8 @@ export default function Sidebar() {
           <p className="mt-2 text-xs text-morandi-danger">{t("sidebar.saveFailed", { error: saveError })}</p>
         )}
       </div>
+        </>
+      )}
 
       {/* 删除确认弹窗 */}
       <ConfirmDialog

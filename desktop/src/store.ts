@@ -1,7 +1,5 @@
 import { create } from "zustand";
-import type { ModDependencyReport } from "@core/mod-manager/dependency-checker";
 import type { Mod, Preset, GameInfo, OverwriteAnalysis, ModConflictStats, BootstrapResponse } from "./types";
-
 interface AppState {
   mods: Mod[]; presets: Preset[]; games: GameInfo[]; currentGame: string;
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
@@ -19,13 +17,6 @@ interface AppState {
   subscribedWorkshopIds: string[];
   dependencyFocusMod: string | null;
   showDependencyModal: boolean;
-  /** 批量必须 mod 告警（勾选/导入/切换 Profile 后） */
-  dependencyAlertReports: ModDependencyReport[] | null;
-  /** 用户已确认必须 mod 告警后，不再因逐个启用 mod 而自动弹出 */
-  dependencyAlertsSuppressed: boolean;
-  /** 已知分类列表（含自定义） */
-  categories: string[];
-  categoryFilter: string | null;
   updateFocusMod: string | null;
   showUpdateModal: boolean;
   isCheckingUpdates: boolean;
@@ -34,8 +25,8 @@ interface AppState {
   /** Mod names currently undergoing background required-mod detection. */
   prerequisiteChecking: Record<string, boolean>;
   setMods: (m: Mod[]) => void; setPresets: (p: Preset[]) => void;
-  setGames: (g: GameInfo[]) => void; setCurrentGame: (g: string) => void;
-  setFolderPaths: (p?: any) => void; setFilter: (f: string) => void;
+  setGames: (g: GameInfo[]) => void;
+  setCurrentGame: (g: string) => void;  setFolderPaths: (p?: any) => void; setFilter: (f: string) => void;
   setActivePresetName: (n: string | null) => void;
   setIsScanning: (v: boolean) => void; setIsLaunching: (v: boolean) => void;
   setShowGameMenu: (v: boolean) => void; setShowNewPresetModal: (v: boolean) => void;
@@ -48,11 +39,6 @@ interface AppState {
   refreshOverwriteStats: (opts?: { full?: boolean }) => Promise<void>;
   openDependencyModal: (modName: string) => void;
   closeDependencyModal: () => void;
-  openDependencyAlert: (reports: ModDependencyReport[], options?: { force?: boolean }) => void;
-  closeDependencyAlert: () => void;
-  resetDependencyAlertSuppression: () => void;
-  setCategories: (categories: string[]) => void;
-  setCategoryFilter: (category: string | null) => void;
   openUpdateModal: (modName: string) => void;
   closeUpdateModal: () => void;
   setIsCheckingUpdates: (v: boolean) => void;
@@ -71,16 +57,13 @@ export const useStore = create<AppState>((set, get) => ({
   compatFocusMod: null, overwriteStats: null, overwriteAnalysis: null,
   originalMods: [], subscribedWorkshopIds: [],
   dependencyFocusMod: null, showDependencyModal: false,
-  dependencyAlertReports: null,
-  dependencyAlertsSuppressed: false,
-  categories: [], categoryFilter: null,
   updateFocusMod: null, showUpdateModal: false, isCheckingUpdates: false,
   saveError: null,
   prerequisiteChecking: {},
   setMods: (mods) => set({ mods }),
   setPresets: (presets) => set({ presets }),
-  setGames: (games) => set({ games }), setCurrentGame: (currentGame) => set({ currentGame, dependencyAlertsSuppressed: false }),
-  setFolderPaths: (folderPaths) => set({ folderPaths }), setFilter: (filter) => set({ filter }),
+  setGames: (games) => set({ games }),
+  setCurrentGame: (currentGame) => set({ currentGame }),  setFolderPaths: (folderPaths) => set({ folderPaths }), setFilter: (filter) => set({ filter }),
   setActivePresetName: (activePresetName) => {
     set({ activePresetName });
     window.api?.setActivePresetName(activePresetName).catch(console.error);
@@ -108,19 +91,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
   openDependencyModal: (modName) => set({ showDependencyModal: true, dependencyFocusMod: modName }),
   closeDependencyModal: () => set({ showDependencyModal: false, dependencyFocusMod: null }),
-  openDependencyAlert: (reports, options) => {
-    if (reports.length === 0) return;
-    const { dependencyAlertsSuppressed, dependencyAlertReports } = get();
-    if (dependencyAlertsSuppressed && !options?.force && !dependencyAlertReports) return;
-    set({ dependencyAlertReports: reports });
-  },
-  closeDependencyAlert: () => set({
-    dependencyAlertReports: null,
-    dependencyAlertsSuppressed: true,
-  }),
-  resetDependencyAlertSuppression: () => set({ dependencyAlertsSuppressed: false }),
-  setCategories: (categories) => set({ categories }),
-  setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
   openUpdateModal: (modName) => set({ showUpdateModal: true, updateFocusMod: modName }),
   closeUpdateModal: () => set({ showUpdateModal: false, updateFocusMod: null }),
   setIsCheckingUpdates: (isCheckingUpdates) => set({ isCheckingUpdates }),
@@ -165,10 +135,8 @@ export const useStore = create<AppState>((set, get) => ({
       currentGame: data.currentGame,
       folderPaths: data.folderPaths,
       subscribedWorkshopIds: data.subscribedWorkshopIds ?? [],
-      categories: data.categories ?? [],
       activePresetName: data.currentPresetName ?? null,
-      isDirty: false,
-      saveError: null,
+      isDirty: false,      saveError: null,
     });
   },
   filteredMods: () => {

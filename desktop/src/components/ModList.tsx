@@ -1,45 +1,207 @@
-import { useState, useMemo, useCallback, useEffect, useRef, memo } from "react";
-import { DndContext, closestCenter, KeyboardSensor, MouseSensor, useSensor, useSensors,
-  DragEndEvent, DragOverlay, DragStartEvent } from "@dnd-kit/core";
-import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { useState, useMemo, useCallback, useEffect, memo, type ReactNode } from "react";
+import {
+  DndContext, closestCenter, KeyboardSensor, MouseSensor, useSensor, useSensors,
+  DragEndEvent, DragOverlay, DragStartEvent, useDroppable,
+} from "@dnd-kit/core";
+import {
+  SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable, arrayMove,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useStore } from "../store";
 import { useT } from "../i18n";
-import { useViewModeStore } from "../viewModeStore";
-import { ViewModeToggle } from "./ViewModeToggle";
-import { Search, ToggleLeft, ToggleRight, GripVertical, Check, Package, Info, ArrowDown, ArrowUp, ArrowUpToLine, ArrowDownToLine, AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput } from "lucide-react";
+import {
+  GripVertical, Package, Info, ArrowDown, ArrowUp, ArrowUpToLine, ArrowDownToLine,
+  AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput, X, Plus,
+} from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
-import ModCategorySelect from "./ModCategorySelect";
-import CategoryFilter from "./CategoryFilter";
+import ModListFiltersBar from "./ModListFiltersBar";
+import ModRowTags from "./ModRowTags";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
-import { getModCategory, normalizeWorkshopTags } from "@core/mod-manager/category-utils";
-import { getModDisplayName, hasWorkshopDisplayName } from "@core/mod-manager/mod-display";
+import { getModWorkshopTags } from "@core/mod-manager/category-utils";
+import { getModDisplayName, getModSourceType } from "@core/mod-manager/mod-display";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
-import { getModDependencyReport } from "../utils/dependency-actions";
-import { reorderModByStep, reorderModToEdge } from "../utils/load-order";
+import { sortByName, getEnabledModsInLoadOrder } from "@core/mod-manager/mod-sorting";
+import {
+  getEnabledModNames,
+  insertEnabledModInOrder,
+  reorderEnabledModByStep,
+  reorderEnabledModToEdge,
+} from "../utils/load-order";
+import {
+  DEFAULT_MOD_LIST_FILTERS,
+  collectModFilterTags,
+  filterMods,
+  hasActiveModFilters,
+  type ModListFilterState,
+} from "../utils/mod-list-filters";
+import { useWorkshopTagLabel } from "../utils/workshop-tag-label";
 
-// ─── 单行 Mod（memo 化，拖拽时不触发整列表重渲染）─────────────────────────
+const PROFILE_PREFIX = "profile:";
+
+function profileId(modName: string): string {
+  return `${PROFILE_PREFIX}${modName}`;
+}
+
+function parseProfileDragId(id: string): string | null {
+  if (!id.startsWith(PROFILE_PREFIX)) return null;
+  return id.slice(PROFILE_PREFIX.length);
+}
 
 function modLabel(mods: Mod[], packName: string): string {
   const m = mods.find(x => x.name === packName);
   return m ? getModDisplayName(m) : packName.replace(/\.pack$/i, "");
 }
 
-function buildOverwriteTooltip(t: (key: string, params?: Record<string, string | number>) => string, stats: ModConflictStats, mods: Mod[]): string {
-  const lines = [t("modlist.rowOverwriteDetail", { wins: stats.wins, losses: stats.losses })];
-  const beatNames = stats.overwrites?.slice(0, 2).map(r => modLabel(mods, r.modName));
-  const loseNames = stats.overwrittenBy?.slice(0, 2).map(r => modLabel(mods, r.modName));
-  if (beatNames?.length) lines.push(t("modlist.rowOverwriteBeats", { mods: beatNames.join(" · ") }));
-  if (loseNames?.length) lines.push(t("modlist.rowOverwriteLosesTo", { mods: loseNames.join(" · ") }));
+function buildOverwriteTooltip(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  stats: ModConflictStats,
+  mods: Mod[],
+): string {
+  const lines: string[] = [];
+  const beatNames = stats.overwrites?.slice(0, 3).map(r => modLabel(mods, r.modName));
+  const loseNames = stats.overwrittenBy?.slice(0, 3).map(r => modLabel(mods, r.modName));
+
+  if (stats.wins > 0 && beatNames?.length) {
+    lines.push(t("modlist.rowOverwriteBeats", { mods: beatNames.join(" · ") }));
+  }
+  if (stats.losses > 0 && loseNames?.length) {
+    lines.push(t("modlist.rowOverwriteLosesTo", { mods: loseNames.join(" · ") }));
+  }
+  if (lines.length === 0) {
+    lines.push(t("compat.noConflictsForMod"));
+  }
   lines.push(t("modlist.rowOverwriteTooltip"));
   return lines.join("\n");
 }
 
-interface ModRowProps {
+function isAwaitingDownloadOnly(mod: Mod): boolean {
+  return !!mod.pendingDownload && !(mod.size && mod.size > 0);
+}
+
+interface ModRowActionsProps {
   mod: Mod;
-  onToggle: (mod: Mod) => void;
+  inProfile: boolean;
+  dependencyIssueCount: number;
+  hasUpdate: boolean;
+  onShowCompat: (modName: string) => void;
+  onShowDependency: (modName: string) => void;
+  onShowUpdate: (modName: string) => void;
+  onRequestDownload: (mod: Mod) => void;
+}
+
+function ModRowActions({
+  mod, inProfile, dependencyIssueCount, hasUpdate,
+  onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
+}: ModRowActionsProps) {
+  const t = useT();
+  const allMods = useStore(s => s.mods);
+  const stats = useStore(s => inProfile ? s.overwriteStats?.[mod.name] : undefined);
+  const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
+
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      {mod.pendingDownload && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRequestDownload(mod); }}
+          className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
+          title={t("modlist.requestDownloadTooltip")}
+        >
+          <DownloadCloud className="w-4 h-4" />
+        </button>
+      )}
+      {isCheckingPrerequisites && !mod.pendingDownload && (
+        <span className="p-1 text-morandi-accent" title={t("dependency.checking")}>
+          <Loader2 className="w-4 h-4 animate-spin" />
+        </span>
+      )}
+      {hasUpdate && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onShowUpdate(mod.name); }}
+          className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
+          title={t("modlist.updateTooltip")}
+        >
+          <DownloadCloud className="w-4 h-4" />
+        </button>
+      )}
+      {inProfile && dependencyIssueCount > 0 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onShowDependency(mod.name); }}
+          className="p-1 rounded-md text-morandi-warning hover:bg-morandi-warning-light/40 transition-colors"
+          title={t("modlist.dependencyTooltip", { n: dependencyIssueCount })}
+        >
+          <AlertTriangle className="w-4 h-4" />
+        </button>
+      )}
+      {inProfile && stats && (stats.wins > 0 || stats.losses > 0) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onShowCompat(mod.name); }}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-morandi-sidebar/60 hover:bg-morandi-hover transition-colors"
+          title={buildOverwriteTooltip(t, stats, allMods)}
+        >
+          {stats.wins > 0 && (
+            <span className="text-[10px] font-medium text-morandi-success leading-none px-1 py-0.5 rounded bg-morandi-success/10">
+              {t("modlist.overwriteActiveShort", { n: stats.wins })}
+            </span>
+          )}
+          {stats.losses > 0 && (
+            <span className="text-[10px] font-medium text-morandi-danger leading-none px-1 py-0.5 rounded bg-morandi-danger/10">
+              {t("modlist.overwriteOverriddenShort", { n: stats.losses })}
+            </span>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface ModRowMetaProps {
+  mod: Mod;
+  emphasized?: boolean;
+}
+
+function ModRowMeta({ mod, emphasized }: ModRowMetaProps) {
+  const displayName = getModDisplayName(mod);
+  const workshopTags = getModWorkshopTags(mod);
+
+  return (
+    <>
+      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
+        {mod.imgPath ? (
+          <img
+            src={`file:///${mod.imgPath.replace(/\\/g, "/")}`}
+            className="w-full h-full object-cover"
+            alt={displayName}
+            loading="lazy"
+            draggable={false}
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+              (e.target as HTMLImageElement).nextElementSibling?.classList.remove("hidden");
+            }}
+          />
+        ) : null}
+        <Package className={clsx("w-5 h-5 text-morandi-text-muted", mod.imgPath && "hidden")} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className={clsx(
+          "text-sm truncate",
+          emphasized ? "text-morandi-text font-medium" : "text-morandi-text-secondary",
+        )}>
+          {displayName}
+        </div>
+        <ModRowTags
+          source={getModSourceType(mod)}
+          workshopTags={workshopTags}
+        />
+      </div>
+    </>
+  );
+}
+
+interface CatalogModRowProps {
+  mod: Mod;
+  onAddToProfile: (mod: Mod) => void;
   onShowDetail: (mod: Mod) => void;
   onShowCompat: (modName: string) => void;
   onShowDependency: (modName: string) => void;
@@ -47,50 +209,115 @@ interface ModRowProps {
   onRequestDownload: (mod: Mod) => void;
   dependencyIssueCount: number;
   hasUpdate: boolean;
-  category: string | null;
-  categories: string[];
-  onCategoryChange: (modName: string, category: string | null) => void;
-  onAddCategory: (name: string) => void;
-  onMoveToTop: (mod: Mod) => void;
-  onMoveToBottom: (mod: Mod) => void;
+}
+
+const CatalogModRow = memo(function CatalogModRow({
+  mod, onAddToProfile, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
+  dependencyIssueCount, hasUpdate,
+}: CatalogModRowProps) {
+  const t = useT();
+  const awaitingDownloadOnly = isAwaitingDownloadOnly(mod);
+  const canAdd = !awaitingDownloadOnly;
+
+  return (
+    <div
+      data-catalog-mod-name={mod.name}
+      className={clsx(
+        "group flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50",
+        mod.isEnabled ? "bg-morandi-page/30" : "bg-morandi-page/50",
+        awaitingDownloadOnly && "opacity-70",
+      )}
+      onDoubleClick={() => onShowDetail(mod)}
+    >
+      {canAdd ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAddToProfile(mod); }}
+          className="flex items-center justify-center w-7 h-7 shrink-0 self-start rounded-md bg-morandi-accent/15 text-morandi-accent border border-morandi-accent/25 hover:bg-morandi-accent hover:text-white hover:border-morandi-accent transition-colors"
+          title={t("modlist.addToProfileHint")}
+          aria-label={t("modlist.addToProfile")}
+        >
+          <Plus className="w-4 h-4" strokeWidth={2.5} />
+        </button>
+      ) : (
+        <div className="w-7 shrink-0 self-start" title={t("modlist.downloadingTooltip")} aria-label={t("modlist.downloadingTooltip")} />
+      )}
+      <ModRowMeta mod={mod} />
+      <div className="shrink-0 self-start mt-1">
+        <ModRowActions
+          mod={mod}
+          inProfile={false}
+          dependencyIssueCount={dependencyIssueCount}
+          hasUpdate={hasUpdate}
+          onShowCompat={onShowCompat}
+          onShowDependency={onShowDependency}
+          onShowUpdate={onShowUpdate}
+          onRequestDownload={onRequestDownload}
+        />
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onShowDetail(mod); }}
+        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0 self-start mt-0.5"
+        title={t("modlist.viewDetails")}
+      >
+        <Info className="w-4 h-4 text-morandi-text-muted" />
+      </button>
+    </div>
+  );
+});
+
+interface ProfileModRowProps {
+  mod: Mod;
+  onShowDetail: (mod: Mod) => void;
+  onShowCompat: (modName: string) => void;
+  onShowDependency: (modName: string) => void;
+  onShowUpdate: (modName: string) => void;
+  onRequestDownload: (mod: Mod) => void;
+  onRemove: (mod: Mod) => void;
   onMoveUp: (mod: Mod) => void;
   onMoveDown: (mod: Mod) => void;
+  onMoveToTop: (mod: Mod) => void;
+  onMoveToBottom: (mod: Mod) => void;
+  dependencyIssueCount: number;
+  hasUpdate: boolean;
   isAtListTop: boolean;
   isAtListBottom: boolean;
 }
 
-const ModRow = memo(function ModRow({
-  mod, onToggle, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, dependencyIssueCount,
-  hasUpdate, category, categories, onCategoryChange, onAddCategory,
-  onMoveToTop, onMoveToBottom, onMoveUp, onMoveDown, isAtListTop, isAtListBottom,
-}: ModRowProps) {
+const ProfileModRow = memo(function ProfileModRow({
+  mod, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload, onRemove,
+  onMoveUp, onMoveDown, onMoveToTop, onMoveToBottom,
+  dependencyIssueCount, hasUpdate,
+  isAtListTop, isAtListBottom,
+}: ProfileModRowProps) {
   const t = useT();
-  const allMods = useStore(s => s.mods);
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortDragging } = useSortable({ id: mod.name });
-  const style = { transform: CSS.Transform.toString(transform), transition };
-  // 仅订阅本行的覆盖统计，避免其他 mod 统计变化导致重渲染
-  const stats = useStore(s => mod.isEnabled ? s.overwriteStats?.[mod.name] : undefined);
   const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
-
-  const displayName = getModDisplayName(mod);
-  const hasWorkshopName = hasWorkshopDisplayName(mod);
-  const downloadPct = mod.downloadBytesTotal && mod.downloadBytesTotal > 0
-    ? Math.min(100, Math.round(100 * (mod.downloadBytesCurrent ?? 0) / mod.downloadBytesTotal))
-    : null;
-  const isValidating = mod.pendingDownload && downloadPct === 100;
-  const awaitingDownloadOnly = mod.pendingDownload && !(mod.size && mod.size > 0);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: profileId(mod.name),
+    data: { kind: "profile", modName: mod.name },
+  });
+  const style = { transform: CSS.Transform.toString(transform), transition };
 
   return (
-    <div ref={setNodeRef} style={style} data-mod-name={mod.name}
-      className={clsx("group flex items-center gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50",
-        isSortDragging && "opacity-50",
+    <div
+      ref={setNodeRef}
+      style={style}
+      data-profile-mod-name={mod.name}
+      className={clsx(
+        "group flex items-start gap-3 px-4 py-2.5 border-b border-morandi-border-light transition-all duration-200 cursor-pointer hover:bg-morandi-hover/50 bg-morandi-card",
+        isDragging && "opacity-50",
         isCheckingPrerequisites && "bg-morandi-accent-light/15",
-        mod.pendingDownload && awaitingDownloadOnly && "bg-morandi-accent-light/10",
-        mod.isEnabled ? "bg-morandi-card" : "bg-morandi-page/50")}
-      onDoubleClick={() => onShowDetail(mod)}>
-      <div className="flex items-center gap-0.5 shrink-0">
-        <div {...attributes} {...listeners}
-          className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none">
+      )}
+      onDoubleClick={() => onShowDetail(mod)}
+    >
+      <div className="flex items-center gap-0.5 shrink-0 self-start mt-0.5">
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-morandi-hover transition-colors touch-none"
+          title={t("modlist.dragReorderHint")}
+          aria-label={t("modlist.dragReorderHint")}
+        >
           <GripVertical className="w-4 h-4 text-morandi-text-muted" />
         </div>
         <button
@@ -133,134 +360,32 @@ const ModRow = memo(function ModRow({
         >
           <ArrowDownToLine className="w-3.5 h-3.5 text-morandi-text-muted" />
         </button>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove(mod); }}
+          className="p-1 rounded hover:bg-morandi-danger-light transition-colors opacity-0 group-hover:opacity-100"
+          title={t("modlist.removeFromProfileHint")}
+          aria-label={t("modlist.removeFromProfile")}
+        >
+          <X className="w-3.5 h-3.5 text-morandi-danger" />
+        </button>
       </div>
-      <button onClick={(e) => { e.stopPropagation(); onToggle(mod); }}
-        disabled={(isCheckingPrerequisites && !mod.isEnabled) || (awaitingDownloadOnly && !mod.isEnabled)}
-        title={
-          awaitingDownloadOnly ? t("modlist.downloadingTooltip")
-            : isCheckingPrerequisites ? t("dependency.checking")
-            : undefined
-        }
-        className={clsx("w-5 h-5 rounded border-2 flex items-center justify-center transition-all shrink-0",
-          awaitingDownloadOnly && "border-morandi-accent-light bg-morandi-accent-light/20 cursor-not-allowed",
-          isCheckingPrerequisites && "border-morandi-accent-light bg-morandi-accent-light/30",
-          !isCheckingPrerequisites && !awaitingDownloadOnly && mod.isEnabled && "bg-morandi-success border-morandi-success",
-          !isCheckingPrerequisites && !awaitingDownloadOnly && !mod.isEnabled && "border-morandi-border hover:border-morandi-accent-light",
-          isCheckingPrerequisites && "cursor-wait")}>
-        {isCheckingPrerequisites ? (
-          <Loader2 className="w-3 h-3 text-morandi-accent animate-spin" />
-        ) : awaitingDownloadOnly ? (
-          <Loader2 className="w-3 h-3 text-morandi-accent animate-spin" />
-        ) : mod.isEnabled ? (
-          <Check className="w-3 h-3 text-white" strokeWidth={3} />
-        ) : null}
-      </button>
-      {/* 工坊封面图片 — lazy 加载 */}
-      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
-        {mod.imgPath ? (
-          <img
-            src={`file:///${mod.imgPath.replace(/\\/g, '/')}`}
-            className="w-full h-full object-cover"
-            alt={displayName}
-            loading="lazy"
-            draggable={false}
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = 'none';
-              (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-            }}
-          />
-        ) : null}
-        <Package className={clsx("w-5 h-5 text-morandi-text-muted", mod.imgPath && "hidden")} />
+      <ModRowMeta mod={mod} emphasized />
+      <div className="shrink-0 self-start mt-1">
+        <ModRowActions
+          mod={mod}
+          inProfile
+          dependencyIssueCount={dependencyIssueCount}
+          hasUpdate={hasUpdate}
+          onShowCompat={onShowCompat}
+          onShowDependency={onShowDependency}
+          onShowUpdate={onShowUpdate}
+          onRequestDownload={onRequestDownload}
+        />
       </div>
-      <div className="flex-1 min-w-0">
-        <div className={clsx(
-          "text-sm truncate",
-          mod.isEnabled ? "text-morandi-text font-medium" : "text-morandi-text-secondary"
-        )}>
-          {displayName}
-        </div>
-        <div className="text-xs text-morandi-text-muted truncate">
-          {awaitingDownloadOnly ? (
-            <span className="text-morandi-accent">
-              {isValidating
-                ? t("modlist.downloadValidating")
-                : downloadPct != null && downloadPct > 0
-                  ? t("modlist.downloadProgress", { pct: downloadPct })
-                  : t("modlist.downloadQueued")}
-            </span>
-          ) : (
-            <>
-              {mod.author && <span className="text-morandi-accent">{mod.author}</span>}
-              {mod.author && hasWorkshopName && <span> · </span>}
-              {hasWorkshopName && <span className="font-mono text-morandi-text-muted/70">{mod.name.replace(".pack", "")}</span>}
-            </>
-          )}
-        </div>
-      </div>
-      {/* 冲突 / 更新 / 依赖：位于种类选择器左侧 */}
-      <div className="flex items-center gap-0.5 shrink-0">
-        {mod.pendingDownload && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onRequestDownload(mod); }}
-            className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
-            title={t("modlist.requestDownload")}
-          >
-            <DownloadCloud className="w-4 h-4" />
-          </button>
-        )}
-        {isCheckingPrerequisites && !mod.pendingDownload && (
-          <span className="p-1 text-morandi-accent" title={t("dependency.checking")}>
-            <Loader2 className="w-4 h-4 animate-spin" />
-          </span>
-        )}
-        {hasUpdate && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onShowUpdate(mod.name); }}
-            className="p-1 rounded-md text-morandi-accent hover:bg-morandi-accent-light/40 transition-colors"
-            title={t("modlist.updateTooltip")}
-          >
-            <DownloadCloud className="w-4 h-4" />
-          </button>
-        )}
-        {mod.isEnabled && dependencyIssueCount > 0 && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onShowDependency(mod.name); }}
-            className="p-1 rounded-md text-morandi-warning hover:bg-morandi-warning-light/40 transition-colors"
-            title={t("modlist.dependencyTooltip", { n: dependencyIssueCount })}
-          >
-            <AlertTriangle className="w-4 h-4" />
-          </button>
-        )}
-        {mod.isEnabled && stats && (stats.wins > 0 || stats.losses > 0) && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onShowCompat(mod.name); }}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-morandi-sidebar/60 hover:bg-morandi-hover transition-colors"
-            title={buildOverwriteTooltip(t, stats, allMods)}
-          >
-            {stats.wins > 0 && (
-              <span className="text-[10px] font-medium text-morandi-success leading-none px-1 py-0.5 rounded bg-morandi-success/10">
-                {t("modlist.overwriteActiveShort", { n: stats.wins })}
-              </span>
-            )}
-            {stats.losses > 0 && (
-              <span className="text-[10px] font-medium text-morandi-danger leading-none px-1 py-0.5 rounded bg-morandi-danger/10">
-                {t("modlist.overwriteOverriddenShort", { n: stats.losses })}
-              </span>
-            )}
-          </button>
-        )}
-      </div>
-      <ModCategorySelect
-        compact
-        value={category}
-        categories={categories}
-        workshopTags={normalizeWorkshopTags(mod.tags)}
-        onChange={(cat) => onCategoryChange(mod.name, cat)}
-        onAddCategory={onAddCategory}
-      />
       <button
         onClick={(e) => { e.stopPropagation(); onShowDetail(mod); }}
-        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+        className="p-1.5 rounded hover:bg-morandi-hover transition-colors opacity-0 group-hover:opacity-100 shrink-0 self-start mt-0.5"
         title={t("modlist.viewDetails")}
       >
         <Info className="w-4 h-4 text-morandi-text-muted" />
@@ -269,35 +394,62 @@ const ModRow = memo(function ModRow({
   );
 });
 
-// ─── 拖拽预览 ──────────────────────────────────────────────────────────────
-
 function DragOverlayContent({ mod }: { mod: Mod }) {
-  const displayName = getModDisplayName(mod);
   return (
     <div className="drag-overlay flex items-center gap-3 px-4 py-2.5">
       <GripVertical className="w-4 h-4 text-morandi-accent" />
-      <div className={clsx("w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
-        mod.isEnabled ? "bg-morandi-success border-morandi-success" : "border-morandi-border")}>
-        {mod.isEnabled && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+      <div className="text-sm font-medium text-morandi-text truncate">{getModDisplayName(mod)}</div>
+    </div>
+  );
+}
+
+function ModPanel({
+  title,
+  titleHint,
+  subtitle,
+  headerExtra,
+  dropId,
+  isOverClass,
+  children,
+  empty,
+}: {
+  title: string;
+  titleHint?: string;
+  subtitle?: string;
+  headerExtra?: ReactNode;
+  dropId: string;
+  isOverClass?: string;
+  children: ReactNode;
+  empty?: ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: dropId });
+
+  return (
+    <div className="flex-1 min-w-0 flex flex-col border-r border-morandi-border-light last:border-r-0">
+      <div className="px-4 py-3 border-b border-morandi-border-light bg-morandi-sidebar/40">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-morandi-text truncate" title={titleHint}>{title}</h3>
+            {subtitle && <p className="text-xs text-morandi-text-muted mt-0.5">{subtitle}</p>}
+          </div>
+        </div>
+        {headerExtra}
       </div>
-      <div className="w-10 h-10 rounded-md bg-morandi-sidebar flex items-center justify-center shrink-0 overflow-hidden">
-        {mod.imgPath ? <img src={`file:///${mod.imgPath.replace(/\\/g, '/')}`} className="w-full h-full object-cover" alt="" draggable={false} />
-        : <Package className="w-5 h-5 text-morandi-text-muted" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-morandi-text truncate">{displayName}</div>
-        {mod.author && <div className="text-xs text-morandi-accent truncate">{mod.author}</div>}
+      <div
+        ref={setNodeRef}
+        className={clsx(
+          "flex-1 overflow-y-auto min-h-0 transition-colors",
+          isOver && isOverClass,
+        )}
+      >
+        {empty ?? children}
       </div>
     </div>
   );
 }
 
-// ─── 主列表 ────────────────────────────────────────────────────────────────
-
 export default function ModList() {
   const t = useT();
-  const filter = useStore(s => s.filter);
-  const setFilter = useStore(s => s.setFilter);
   const setMods = useStore(s => s.setMods);
   const mods = useStore(s => s.mods);
   const isScanning = useStore(s => s.isScanning);
@@ -305,45 +457,17 @@ export default function ModList() {
   const markDirty = useStore(s => s.markDirty);
   const openCompatPanel = useStore(s => s.openCompatPanel);
   const openDependencyModal = useStore(s => s.openDependencyModal);
-  const openDependencyAlert = useStore(s => s.openDependencyAlert);
   const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
-  const categories = useStore(s => s.categories);
-  const setCategories = useStore(s => s.setCategories);
-  const categoryFilter = useStore(s => s.categoryFilter);
   const openUpdateModal = useStore(s => s.openUpdateModal);
   const isCheckingUpdates = useStore(s => s.isCheckingUpdates);
   const setIsCheckingUpdates = useStore(s => s.setIsCheckingUpdates);
   const refreshOverwriteStats = useStore(s => s.refreshOverwriteStats);
-  const currentGame = useStore(s => s.currentGame);
-  const activePresetName = useStore(s => s.activePresetName);
-  // 显示模式（来自独立的持久化 store）
-  const viewMode = useViewModeStore(s => s.current);
-  const loadMode = useViewModeStore(s => s.loadMode);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const tagLabel = useWorkshopTagLabel();
+
+  const [modFilters, setModFilters] = useState<ModListFilterState>(DEFAULT_MOD_LIST_FILTERS);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
-  const pendingDependencyAlertRef = useRef<string | null>(null);
-  const dragReorderEnabled = viewMode === "all" && !filter && !categoryFilter;
-
-  useEffect(() => {
-    const onDone = (modName: string) => {
-      if (pendingDependencyAlertRef.current !== modName) return;
-      pendingDependencyAlertRef.current = null;
-      const { mods: currentMods, subscribedWorkshopIds: subs } = useStore.getState();
-      const updated = currentMods.find(m => m.name === modName);
-      if (updated?.isEnabled) {
-        const report = getModDependencyReport(updated, currentMods, subs);
-        if (report) openDependencyAlert([report]);
-      }
-    };
-    const off = window.api.onPrerequisitesCheckDone?.(onDone);
-    return () => off?.();
-  }, [openDependencyAlert]);
-
-  // 切换 game / profile 时自动加载已记忆的显示模式
-  useEffect(() => {
-    if (activePresetName) loadMode(currentGame, activePresetName);
-  }, [currentGame, activePresetName, loadMode]);
 
   useEffect(() => {
     if (!importMessage) return;
@@ -351,30 +475,21 @@ export default function ModList() {
     return () => window.clearTimeout(id);
   }, [importMessage]);
 
-  const filteredMods = useMemo(() => {
-    // 第一步：按显示模式过滤（启用/禁用/全部）
-    let result = mods;
-    if (viewMode === "enabled") result = mods.filter(m => m.isEnabled);
-    else if (viewMode === "disabled") result = mods.filter(m => !m.isEnabled);
-    // 按分类筛选
-    if (categoryFilter) {
-      result = result.filter(m => getModCategory(m) === categoryFilter);
-    }
-    // 按搜索文本过滤
-    if (!filter) return result;
-    const l = filter.toLowerCase();
-    return result.filter(m => {
-      const name = m.name?.toLowerCase() || "";
-      const humanName = m.humanName?.toLowerCase() || "";
-      const workshopId = m.workshopId || "";
-      return name.includes(l) || humanName.includes(l) || workshopId.includes(l);
-    });
-  }, [mods, filter, viewMode, categoryFilter]);
-
-  const outdatedCount = useMemo(
-    () => mods.filter(isModOutdated).length,
+  const filterOptions = useMemo(() => ({ tagLabel }), [tagLabel]);
+  const filtersActive = hasActiveModFilters(modFilters);
+  const availableTags = useMemo(
+    () => collectModFilterTags(mods.filter(m => !m.isEnabled)),
     [mods],
   );
+
+  const catalogMods = useMemo(() => {
+    const sorted = sortByName(mods.filter(m => !m.isEnabled));
+    return filterMods(sorted, modFilters, filterOptions);
+  }, [mods, modFilters, filterOptions]);
+
+  const profileMods = useMemo(() => getEnabledModsInLoadOrder(mods), [mods]);
+
+  const outdatedCount = useMemo(() => mods.filter(isModOutdated).length, [mods]);
 
   const outdatedByName = useMemo(() => {
     const map: Record<string, boolean> = {};
@@ -384,51 +499,93 @@ export default function ModList() {
     return map;
   }, [mods]);
 
+  const dependencyIssueCounts = useMemo(() => {
+    const ctx = { mods, subscribedWorkshopIds: new Set(subscribedWorkshopIds) };
+    const counts: Record<string, number> = {};
+    for (const mod of profileMods) {
+      const n = getModDependencyIssues(mod, ctx).length;
+      if (n > 0) counts[mod.name] = n;
+    }
+    return counts;
+  }, [profileMods, mods, subscribedWorkshopIds]);
+
+  const listEdgeByName = useMemo(() => ({
+    top: profileMods[0]?.name,
+    bottom: profileMods[profileMods.length - 1]?.name,
+  }), [profileMods]);
+
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const activeMod = useMemo(() => activeId ? mods.find(m => m.name === activeId) ?? null : null, [activeId, mods]);
+  const activeDragMod = useMemo(() => {
+    if (!activeDragId) return null;
+    const modName = parseProfileDragId(activeDragId);
+    if (!modName) return null;
+    return mods.find(m => m.name === modName) ?? null;
+  }, [activeDragId, mods]);
 
-  // 稳定的回调，避免 memo 化的 ModRow 因 props 变化而重渲染
-  const handleToggle = useCallback(async (mod: Mod) => {
-    const wasEnabled = mod.isEnabled;
-    if (!wasEnabled && !useStore.getState().dependencyAlertsSuppressed) {
-      pendingDependencyAlertRef.current = mod.name;
-    } else if (pendingDependencyAlertRef.current === mod.name) {
-      pendingDependencyAlertRef.current = null;
-    }
+  const scrollProfileModIntoView = useCallback((modName: string, block: ScrollLogicalPosition = "nearest") => {
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-profile-mod-name="${globalThis.CSS.escape(modName)}"]`)
+        ?.scrollIntoView({ block, behavior: "smooth" });
+    });
+  }, []);
+
+  const applyProfileOrder = useCallback(async (
+    orderedNames: string[],
+    scroll?: { modName: string; block?: ScrollLogicalPosition },
+  ) => {
     try {
-      const result = await window.api.toggleMod(mod.name);
+      const result = await window.api.applyDragOrder(orderedNames);
+      if (Array.isArray(result)) {
+        setMods(result);
+        markDirty();
+        if (scroll) scrollProfileModIntoView(scroll.modName, scroll.block ?? "nearest");
+      }
+    } catch (e) {
+      console.error("Failed to apply load order:", e);
+    }
+  }, [setMods, markDirty, scrollProfileModIntoView]);
+
+  const addModToProfile = useCallback(async (modName: string, beforeModName: string | null) => {
+    const mod = mods.find(m => m.name === modName);
+    if (!mod || isAwaitingDownloadOnly(mod)) return;
+
+    let nextMods = mods;
+    if (!mod.isEnabled) {
+      try {
+        const enabled = await window.api.enableMod(modName);
+        if (!Array.isArray(enabled)) return;
+        nextMods = enabled;
+        setMods(nextMods);
+      } catch (e) {
+        console.error("Failed to enable mod:", e);
+        return;
+      }
+    }
+
+    const ordered = insertEnabledModInOrder(nextMods, modName, beforeModName);
+    await applyProfileOrder(ordered, { modName });
+  }, [mods, setMods, applyProfileOrder]);
+
+  const removeModFromProfile = useCallback(async (mod: Mod) => {
+    try {
+      const result = await window.api.disableMod(mod.name);
       if (Array.isArray(result)) {
         setMods(result);
         markDirty();
       }
     } catch (e) {
-      if (pendingDependencyAlertRef.current === mod.name) {
-        pendingDependencyAlertRef.current = null;
-      }
-      console.error("Failed to toggle mod:", e);
+      console.error("Failed to remove mod from profile:", e);
     }
   }, [setMods, markDirty]);
 
-  const handleShowDetail = useCallback((mod: Mod) => {
-    setSelectedMod(mod);
-  }, []);
-
-  // 点击某 mod 的覆盖徽标 → 打开面板并聚焦该 mod
-  const handleShowCompat = useCallback((modName: string) => {
-    openCompatPanel(modName);
-  }, [openCompatPanel]);
-
-  const handleShowDependency = useCallback((modName: string) => {
-    openDependencyModal(modName);
-  }, [openDependencyModal]);
-
-  const handleShowUpdate = useCallback((modName: string) => {
-    openUpdateModal(modName);
-  }, [openUpdateModal]);
+  const handleShowDetail = useCallback((mod: Mod) => setSelectedMod(mod), []);
+  const handleShowCompat = useCallback((modName: string) => openCompatPanel(modName), [openCompatPanel]);
+  const handleShowDependency = useCallback((modName: string) => openDependencyModal(modName), [openDependencyModal]);
+  const handleShowUpdate = useCallback((modName: string) => openUpdateModal(modName), [openUpdateModal]);
 
   const handleRequestDownload = useCallback(async (mod: Mod) => {
     if (!mod.workshopId || !window.api.triggerWorkshopDownload) return;
@@ -486,60 +643,6 @@ export default function ModList() {
     }
   }, [outdatedCount, setMods, setIsCheckingUpdates, t]);
 
-  const handleCategoryChange = useCallback(async (modName: string, category: string | null) => {
-    try {
-      const result = await window.api.setModCategory(modName, category);
-      setMods(result.mods);
-      setCategories(result.categories);
-      setSelectedMod(prev => prev?.name === modName
-        ? result.mods.find(m => m.name === modName) ?? prev
-        : prev);
-      markDirty();
-    } catch (e) {
-      console.error("Failed to set mod category:", e);
-    }
-  }, [setMods, setCategories, markDirty]);
-
-  const handleAddCategory = useCallback(async (name: string) => {
-    try {
-      const list = await window.api.addCustomCategory(name);
-      setCategories(list);
-    } catch (e) {
-      console.error("Failed to add category:", e);
-    }
-  }, [setCategories]);
-
-  const dependencyIssueCounts = useMemo(() => {
-    const ctx = { mods, subscribedWorkshopIds: new Set(subscribedWorkshopIds) };
-    const counts: Record<string, number> = {};
-    for (const mod of mods) {
-      if (!mod.isEnabled) continue;
-      const n = getModDependencyIssues(mod, ctx).length;
-      if (n > 0) counts[mod.name] = n;
-    }
-    return counts;
-  }, [mods, subscribedWorkshopIds]);
-
-  const handleEnableAll = useCallback(async () => {
-    try {
-      const result = await window.api.enableAll();
-      const mods = Array.isArray(result) ? result : result.mods;
-      const skipped = Array.isArray(result) ? [] : (result.skipped ?? []);
-      setMods(mods);
-      markDirty();
-      if (skipped.length > 0) {
-        setImportMessage(t("modlist.enableAllSkipped", { n: skipped.length }));
-      }
-    } catch (e) { console.error("Failed to enable all:", e); }
-  }, [setMods, markDirty, t]);
-
-  const handleDisableAll = useCallback(async () => {
-    try {
-      const result = await window.api.disableAll();
-      if (Array.isArray(result)) { setMods(result); markDirty(); }
-    } catch (e) { console.error("Failed to disable all:", e); }
-  }, [setMods, markDirty]);
-
   const handleImportLocal = useCallback(async () => {
     setIsScanning(true);
     try {
@@ -585,83 +688,65 @@ export default function ModList() {
     }
   }, [setMods, markDirty, t]);
 
-  const handleDragStart = useCallback((e: DragStartEvent) => {
-    setActiveId(e.active.id as string);
-  }, []);
-
-  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    setActiveId(null);
-    if (!dragReorderEnabled) return;
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const fullOldIndex = mods.findIndex(m => m.name === active.id);
-    const fullNewIndex = mods.findIndex(m => m.name === over.id);
-    if (fullOldIndex === -1 || fullNewIndex === -1) return;
-    const ordered = [...mods];
-    const [moved] = ordered.splice(fullOldIndex, 1);
-    ordered.splice(fullNewIndex, 0, moved);
-    try {
-      const result = await window.api.applyDragOrder(ordered.map(m => m.name));
-      if (Array.isArray(result)) {
-        setMods(result);
-        markDirty();
-      }
-    } catch (e) {
-      console.error("Failed to apply drag order:", e);
-    }
-  }, [mods, setMods, markDirty, dragReorderEnabled]);
-
-  const scrollModIntoView = useCallback((modName: string, block: ScrollLogicalPosition = "nearest") => {
-    requestAnimationFrame(() => {
-      document.querySelector(`[data-mod-name="${globalThis.CSS.escape(modName)}"]`)
-        ?.scrollIntoView({ block, behavior: "smooth" });
-    });
-  }, []);
-
-  const applyOrder = useCallback(async (
-    orderedNames: string[],
-    scroll?: { modName: string; block?: ScrollLogicalPosition },
-  ) => {
-    try {
-      const result = await window.api.applyDragOrder(orderedNames);
-      if (Array.isArray(result)) {
-        setMods(result);
-        markDirty();
-        if (scroll) scrollModIntoView(scroll.modName, scroll.block ?? "nearest");
-      }
-    } catch (e) {
-      console.error("Failed to apply load order:", e);
-    }
-  }, [setMods, markDirty, scrollModIntoView]);
-
-  const handleMoveToTop = useCallback((mod: Mod) => {
-    void applyOrder(reorderModToEdge(mods, mod.name, "top"), { modName: mod.name, block: "start" });
-  }, [mods, applyOrder]);
-
-  const handleMoveToBottom = useCallback((mod: Mod) => {
-    void applyOrder(reorderModToEdge(mods, mod.name, "bottom"), { modName: mod.name, block: "end" });
-  }, [mods, applyOrder]);
-
   const handleMoveUp = useCallback((mod: Mod) => {
-    void applyOrder(reorderModByStep(mods, mod.name, "up"), { modName: mod.name });
-  }, [mods, applyOrder]);
+    void applyProfileOrder(reorderEnabledModByStep(mods, mod.name, "up"), { modName: mod.name });
+  }, [mods, applyProfileOrder]);
 
   const handleMoveDown = useCallback((mod: Mod) => {
-    void applyOrder(reorderModByStep(mods, mod.name, "down"), { modName: mod.name });
-  }, [mods, applyOrder]);
+    void applyProfileOrder(reorderEnabledModByStep(mods, mod.name, "down"), { modName: mod.name });
+  }, [mods, applyProfileOrder]);
 
-  const listEdgeByName = useMemo(() => {
-    const top = mods[0]?.name;
-    const bottom = mods[mods.length - 1]?.name;
-    return { top, bottom };
-  }, [mods]);
+  const handleMoveToTop = useCallback((mod: Mod) => {
+    void applyProfileOrder(reorderEnabledModToEdge(mods, mod.name, "top"), { modName: mod.name, block: "start" });
+  }, [mods, applyProfileOrder]);
 
-  // ── 实时刷新覆盖统计 ──
-  // 当启用的 mod 集合或其加载顺序变化时，防抖刷新后端覆盖统计。
-  // 签名包含所有启用 mod 的 name+loadOrder，勾选/取消/拖动都会改变它。
+  const handleMoveToBottom = useCallback((mod: Mod) => {
+    void applyProfileOrder(reorderEnabledModToEdge(mods, mod.name, "bottom"), { modName: mod.name, block: "end" });
+  }, [mods, applyProfileOrder]);
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    setActiveDragId(String(e.active.id));
+  }, []);
+
+  const handleAddFromCatalog = useCallback((mod: Mod) => {
+    void addModToProfile(mod.name, null);
+  }, [addModToProfile]);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    setActiveDragId(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const modName = parseProfileDragId(String(active.id));
+    if (!modName) return;
+
+    const overId = String(over.id);
+
+    if (overId === "catalog-panel") {
+      const mod = mods.find(m => m.name === modName);
+      if (mod) await removeModFromProfile(mod);
+      return;
+    }
+    if (overId.startsWith(PROFILE_PREFIX)) {
+      const names = getEnabledModNames(mods);
+      const oldIndex = names.indexOf(modName);
+      const newIndex = names.indexOf(overId.slice(PROFILE_PREFIX.length));
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        await applyProfileOrder(arrayMove(names, oldIndex, newIndex), { modName });
+      }
+      return;
+    }
+    if (overId === "profile-panel") {
+      await applyProfileOrder(
+        insertEnabledModInOrder(mods, modName, null),
+        { modName, block: "end" },
+      );
+    }
+  }, [mods, removeModFromProfile, applyProfileOrder]);
+
   const enabledSignature = useMemo(
-    () => mods.filter(m => m.isEnabled).map(m => `${m.name}:${m.loadOrder ?? 0}`).join("|"),
-    [mods],
+    () => profileMods.map(m => `${m.name}:${m.loadOrder ?? 0}`).join("|"),
+    [profileMods],
   );
   useEffect(() => {
     if (!enabledSignature) return;
@@ -669,17 +754,17 @@ export default function ModList() {
     return () => clearTimeout(handle);
   }, [enabledSignature, refreshOverwriteStats]);
 
+  const sharedRowProps = {
+    onShowDetail: handleShowDetail,
+    onShowCompat: handleShowCompat,
+    onShowDependency: handleShowDependency,
+    onShowUpdate: handleShowUpdate,
+    onRequestDownload: handleRequestDownload,
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-4 py-3 border-b border-morandi-border-light bg-morandi-card flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-morandi-text-muted" />
-          <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
-            placeholder={t("modlist.filterPlaceholder")} className="input-morandi !pl-9 !py-1.5" />
-        </div>
-        {/* 显示模式切换器（per-profile 自动记忆） */}
-        <ViewModeToggle />
-        <CategoryFilter />
         <button
           onClick={handleImportLocal}
           disabled={isScanning}
@@ -693,7 +778,7 @@ export default function ModList() {
           onClick={handleCheckUpdates}
           disabled={isCheckingUpdates || isScanning}
           className="btn-morandi-ghost text-xs flex items-center gap-1 relative"
-          title={t("update.checkUpdates")}
+          title={t("update.checkUpdatesTooltip")}
         >
           <RefreshCw className={clsx("w-3.5 h-3.5", isCheckingUpdates && "animate-spin")} />
           {t("update.checkUpdates")}
@@ -708,98 +793,113 @@ export default function ModList() {
             onClick={handleUpdateAll}
             disabled={isCheckingUpdates || isScanning}
             className="btn-morandi-ghost text-xs flex items-center gap-1 text-morandi-accent"
-            title={t("update.updateAll")}
+            title={t("update.updateAllTooltip")}
           >
             <DownloadCloud className="w-3.5 h-3.5" />
             {t("update.updateAll")}
           </button>
         )}
-        <div className="flex items-center gap-1">
-          <button onClick={handleEnableAll} className="btn-morandi-ghost text-xs">
-            <ToggleRight className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOn")}</button>
-          <button onClick={handleDisableAll} className="btn-morandi-ghost text-xs">
-            <ToggleLeft className="w-3.5 h-3.5 inline mr-1" />{t("modlist.allOff")}</button>
-        </div>
-        <div className="text-xs text-morandi-text-muted ml-auto shrink-0">
-          {isScanning ? (
-            <span className="text-morandi-accent">{t("common.loading")}</span>
-          ) : (
-            <button
-              type="button"
-              className="p-1 rounded-md text-morandi-accent/80 hover:bg-morandi-hover transition-colors"
-              title={t("modlist.loadOrderHint")}
-              aria-label={t("modlist.loadOrderHint")}
-            >
-              <ArrowDown className="w-4 h-4" />
-            </button>
-          )}
+        <div className="ml-auto shrink-0">
+          <button
+            type="button"
+            className="p-1 rounded-md text-morandi-accent/80 hover:bg-morandi-hover transition-colors"
+            title={t("modlist.loadOrderHint")}
+            aria-label={t("modlist.loadOrderHint")}
+          >
+            <ArrowDown className="w-4 h-4" />
+          </button>
         </div>
       </div>
+
       {importMessage && (
         <div className="px-4 py-1.5 text-xs text-morandi-accent bg-morandi-accent/5 border-b border-morandi-border-light">
           {importMessage}
         </div>
       )}
-      {!dragReorderEnabled && !isScanning && filteredMods.length > 0 && (
-        <div className="px-4 py-1 text-[11px] text-morandi-text-muted border-b border-morandi-border-light">
-          {t("modlist.dragDisabledHint")}
-        </div>
-      )}
-      <div className="flex-1 overflow-y-auto">
-        {isScanning ? (
-          <div className="flex items-center justify-center h-full text-morandi-text-muted">
-            <div className="text-center">
-              <div className="w-8 h-8 border-2 border-morandi-accent-light border-t-morandi-accent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm">{t("modlist.scanning")}</p>
-            </div>
-          </div>
-        ) : filteredMods.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-morandi-text-muted">
-            <p className="text-sm">{filter || categoryFilter ? t("modlist.noMatch") : t("modlist.noMods")}</p>
-          </div>
-        ) : (
-          <DndContext sensors={sensors} collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}>
-            <SortableContext items={filteredMods.map(m => m.name)} strategy={verticalListSortingStrategy}>
-              {filteredMods.map(mod => (
-                <ModRow
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex-1 min-h-0 flex">
+          <ModPanel
+            title={t("modlist.panelDisabledMods")}
+            titleHint={t("modlist.catalogPanelHint")}
+            dropId="catalog-panel"
+            isOverClass="bg-morandi-danger/5"
+            headerExtra={(
+              <ModListFiltersBar
+                filters={modFilters}
+                onChange={setModFilters}
+                availableTags={availableTags}
+              />
+            )}
+            empty={isScanning ? (
+              <div className="flex items-center justify-center h-full text-morandi-text-muted">
+                <div className="text-center">
+                  <div className="w-8 h-8 border-2 border-morandi-accent-light border-t-morandi-accent rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-sm">{t("modlist.scanning")}</p>
+                </div>
+              </div>
+            ) : catalogMods.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-morandi-text-muted">
+                <p className="text-sm">{filtersActive ? t("modlist.noMatch") : t("modlist.noDisabledMods")}</p>
+              </div>
+            ) : undefined}
+          >
+            {!isScanning && catalogMods.map(mod => (
+              <CatalogModRow
+                key={mod.name}
+                mod={mod}
+                onAddToProfile={handleAddFromCatalog}
+                {...sharedRowProps}
+                dependencyIssueCount={0}
+                hasUpdate={!!outdatedByName[mod.name]}
+              />
+            ))}
+          </ModPanel>
+
+          <ModPanel
+            title={t("modlist.panelEnabledMods")}
+            titleHint={t("modlist.profilePanelHint")}
+            dropId="profile-panel"
+            isOverClass="bg-morandi-accent/5"
+            empty={isScanning ? null : profileMods.length === 0 ? (
+              <div className="h-full" />
+            ) : undefined}
+          >
+            <SortableContext items={profileMods.map(m => profileId(m.name))} strategy={verticalListSortingStrategy}>
+              {profileMods.map(mod => (
+                <ProfileModRow
                   key={mod.name}
                   mod={mod}
-                  onToggle={handleToggle}
-                  onShowDetail={handleShowDetail}
-                  onShowCompat={handleShowCompat}
-                  onShowDependency={handleShowDependency}
-                  onShowUpdate={handleShowUpdate}
-                  onRequestDownload={handleRequestDownload}
-                  dependencyIssueCount={dependencyIssueCounts[mod.name] ?? 0}
-                  hasUpdate={!!outdatedByName[mod.name]}
-                  category={getModCategory(mod)}
-                  categories={categories}
-                  onCategoryChange={handleCategoryChange}
-                  onAddCategory={handleAddCategory}
-                  onMoveToTop={handleMoveToTop}
-                  onMoveToBottom={handleMoveToBottom}
+                  {...sharedRowProps}
+                  onRemove={removeModFromProfile}
                   onMoveUp={handleMoveUp}
                   onMoveDown={handleMoveDown}
+                  onMoveToTop={handleMoveToTop}
+                  onMoveToBottom={handleMoveToBottom}
+                  dependencyIssueCount={dependencyIssueCounts[mod.name] ?? 0}
+                  hasUpdate={!!outdatedByName[mod.name]}
                   isAtListTop={mod.name === listEdgeByName.top}
                   isAtListBottom={mod.name === listEdgeByName.bottom}
                 />
               ))}
             </SortableContext>
-            <DragOverlay>{activeMod ? <DragOverlayContent mod={activeMod} /> : null}</DragOverlay>
-          </DndContext>
-        )}
-      </div>
+          </ModPanel>
+        </div>
 
-      {/* Mod 详情弹窗 */}
+        <DragOverlay>
+          {activeDragMod ? <DragOverlayContent mod={activeDragMod} /> : null}
+        </DragOverlay>
+      </DndContext>
+
       {selectedMod && (
         <ModDetailModal
           mod={selectedMod}
           onClose={() => setSelectedMod(null)}
-          categories={categories}
-          onCategoryChange={handleCategoryChange}
-          onAddCategory={handleAddCategory}
           onShowUpdate={handleShowUpdate}
           onDeleteLocal={handleDeleteLocal}
         />

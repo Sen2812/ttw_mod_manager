@@ -22,6 +22,7 @@ import { ModManager } from "./mod-manager/mod-manager";
 import { SupportedGame, SUPPORTED_GAMES } from "./types";
 import { gameRegistry, BUILTIN_GAMES } from "./game-definitions";
 import { sortByEnabled, sortByLoadOrder, filterMods } from "./mod-manager/mod-sorting";
+import { collectWorkshopTagsFromMods } from "./mod-manager/category-utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -232,7 +233,7 @@ async function cmdInfo(mm: ModManager) {
   console.log(`  Enabled Mods:    ${mm.getEnabledMods().length}`);
   console.log(`  Vanilla Packs:   ${mm.vanillaPacks.size}`);
   console.log(`  Presets:         ${mm.getPresets().length}`);
-  console.log(`  Categories:      ${mm.getCategories().join(", ") || C.dim + "none" + C.reset}`);
+  console.log(`  Workshop Tags:   ${collectWorkshopTagsFromMods(mm.mods).join(", ") || C.dim + "none" + C.reset}`);
   console.log(`  Always Enabled:  ${mm.config.alwaysEnabledMods.map((m) => m.name).join(", ") || C.dim + "none" + C.reset}`);
 }
 

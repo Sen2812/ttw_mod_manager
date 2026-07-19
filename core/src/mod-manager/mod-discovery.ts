@@ -10,8 +10,8 @@ import * as path from "path";
 import * as https from "https";
 import { GameDefinition, GameFolderPaths, Mod } from "../types";
 import { readPackHeader, NodeBinaryReader } from "../pack-file";
-import { readLauncherModNameIndex } from "../launcher/launcher-sync";
-import { fetchWorkshopHtml, parseWorkshopTitle, sleep } from "./workshop-dependencies";
+import { lookupLauncherModName, readLauncherModNameIndex } from "../launcher/launcher-sync";
+import { fetchWorkshopHtml, parseWorkshopTitle, resolveSteamWorkshopLanguage, sleep } from "./workshop-dependencies";
 import { fetchWorkshopRequiredIds } from "./workshop-required-fetcher";
 import { formatSteamFetchSkipReason, isSteamIpcUnavailableError } from "./steam-ipc-error";
 import { fetchSubscribedWorkshopIds } from "./workshop-subscriptions-fetcher";
@@ -498,7 +498,6 @@ export function buildPendingWorkshopMod(
     isMovie: hints?.isMovie ?? false,
     author: hints?.author ?? "",
     tags: hints?.tags?.length ? hints.tags : ["mod"],
-    categories: hints?.categories ? [...hints.categories] : undefined,
     loadOrder: hints?.loadOrder,
     lastChanged: hints?.lastChanged,
     lastChangedLocal: hints?.lastChangedLocal,
@@ -758,8 +757,13 @@ function readWorkshopMetadata(subfolderPath: string): { humanName?: string; auth
       pickTitle(data.title)
       ?? pickTitle(data.name)
       ?? pickTitle(data.Title)
+      ?? pickTitle(data.display_name)
+      ?? pickTitle(data.displayName)
+      ?? pickTitle(data.mod_name)
       ?? pickTitle(data.workshop_title)
-      ?? pickTitle(data.WorkshopName);
+      ?? pickTitle(data.WorkshopName)
+      ?? pickTitle(data.chinese_name)
+      ?? pickTitle(data.zh_name);
     if (title && !result.humanName) result.humanName = title;
 
     const author =
@@ -798,8 +802,10 @@ function readWorkshopMetadata(subfolderPath: string): { humanName?: string; auth
       const content = fs.readFileSync(modTxtPath, "utf8");
       const lines = content.split("\n");
       for (const line of lines) {
-        if (line.startsWith("name:")) {
-          result.humanName = line.substring(5).trim();
+        const trimmed = line.trim();
+        const lower = trimmed.toLowerCase();
+        if (lower.startsWith("name:") || lower.startsWith("title:") || lower.startsWith("display_name:")) {
+          result.humanName = trimmed.substring(trimmed.indexOf(":") + 1).trim();
           break;
         }
       }
@@ -820,7 +826,7 @@ function mergeWorkshopContentIntoDataMod(dataMod: Mod, contentMod: Mod): void {
   if (/^\d{5,15}$/.test(contentMod.workshopId)) {
     dataMod.workshopId = contentMod.workshopId;
   }
-  if (!isUsableWorkshopTitle(dataMod.humanName, dataMod.workshopId)) {
+  if (isUsableWorkshopTitle(contentMod.humanName, dataMod.workshopId)) {
     applyWorkshopTitle(dataMod, contentMod.humanName);
   }
   if ((!dataMod.dependencyPacks || dataMod.dependencyPacks.length === 0) && contentMod.dependencyPacks?.length) {
@@ -840,14 +846,14 @@ function applyLauncherModNames(mods: Mod[], game: GameDefinition, log?: LogCallb
 
   let applied = 0;
   for (const mod of mods) {
-    if (isUsableWorkshopTitle(mod.humanName, mod.workshopId)) continue;
-    const entry = index.get(mod.name.toLowerCase());
-    const title = entry?.name?.trim();
+    const title = lookupLauncherModName(index, mod);
+    if (!title) continue;
+    if (mod.humanName === title) continue;
     if (applyWorkshopTitle(mod, title)) applied++;
   }
 
   if (applied > 0) {
-    log?.(`CA Launcher moddata: applied ${applied} local workshop title(s)`);
+    log?.(`CA Launcher moddata: applied ${applied} display name(s)`);
   }
   return applied;
 }
@@ -863,12 +869,18 @@ async function fetchMissingWorkshopTitles(
   if (pending.length === 0) return;
 
   log?.(`Workshop titles: fetching ${pending.length} missing name(s) from workshop pages...`);
+  const preferredLang = resolveSteamWorkshopLanguage();
   for (const mod of pending) {
     await sleep(TITLE_FETCH_DELAY_MS);
     try {
-      const html = await fetchWorkshopHtml(mod.workshopId);
-      const title = parseWorkshopTitle(html);
-      if (applyWorkshopTitle(mod, title)) {
+      let html = await fetchWorkshopHtml(mod.workshopId, preferredLang);
+      let title = parseWorkshopTitle(html);
+      if (!applyWorkshopTitle(mod, title) && preferredLang !== "english") {
+        html = await fetchWorkshopHtml(mod.workshopId, "english");
+        title = parseWorkshopTitle(html);
+        applyWorkshopTitle(mod, title);
+      }
+      if (isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
         cache.mergeMetadata([[mod.workshopId, { title: mod.humanName }]]);
       } else {
         log?.(`  Workshop ${mod.workshopId}: title unavailable (removed/private or login required)`);
