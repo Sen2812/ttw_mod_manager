@@ -4,10 +4,6 @@ import { START_GAME_PACK_DIR, START_GAME_PACK_NAME, writeSkipIntroPack } from ".
 
 import { BUILTIN_FEATURES, BUILTIN_FEATURES_STAGING_DIR } from "./registry";
 
-import {
-  getCampaignHelpersAvailability,
-} from "./plbuff";
-
 import type {
   BuiltinFeatureStatus,
   PrepareBuiltinFeaturesOptions,
@@ -16,7 +12,7 @@ import type {
 
 function isFeatureEnabled(
   preferences: PrepareBuiltinFeaturesOptions["preferences"],
-  preferenceKey: "isSkipIntroMoviesEnabled" | "isPlbuffInjectionEnabled",
+  preferenceKey: "isSkipIntroMoviesEnabled",
 ): boolean {
   return !!preferences[preferenceKey];
 }
@@ -26,16 +22,11 @@ export function getBuiltinFeatureStatuses(
   options: {
     gameId: PrepareBuiltinFeaturesOptions["gameId"];
     supportedOptions: string[];
-    resourcesRoot: string;
-    dataFolder?: string;
-    contentFolder?: string;
     preferences: PrepareBuiltinFeaturesOptions["preferences"];
     introMoviePaths: string[];
-    enabledModNames?: Iterable<string>;
   },
 ): BuiltinFeatureStatus[] {
   const statuses: BuiltinFeatureStatus[] = [];
-  const enabledNames = options.enabledModNames ?? [];
 
   for (const feature of BUILTIN_FEATURES) {
     if (!feature.games.includes(options.gameId)) continue;
@@ -50,22 +41,6 @@ export function getBuiltinFeatureStatuses(
         available: supported && hasMovies,
         enabled: isFeatureEnabled(options.preferences, feature.preferenceKey),
         bundled: true,
-        mctEnabled: false,
-        modEnabled: false,
-      });
-      continue;
-    }
-
-    if (feature.id === "plbuff") {
-      const avail = getCampaignHelpersAvailability(supported, enabledNames);
-      statuses.push({
-        id: feature.id,
-        kind: feature.kind,
-        available: avail.available,
-        enabled: avail.available,
-        bundled: false,
-        mctEnabled: avail.mctEnabled,
-        modEnabled: avail.modEnabled,
       });
     }
   }
@@ -103,20 +78,14 @@ export function prepareBuiltinFeaturesForLaunch(
       } catch (e) {
         warnings.push(`Failed to write skip-intro pack: ${e instanceof Error ? e.message : String(e)}`);
       }
-      continue;
     }
-
-    // Campaign helpers: user enables MCT + companion mod themselves — no injection.
   }
 
   const statuses = getBuiltinFeatureStatuses({
     gameId: options.gameId,
     supportedOptions: options.supportedOptions,
-    resourcesRoot: options.resourcesRoot,
-    dataFolder: options.dataFolder,
     preferences: options.preferences,
     introMoviePaths: options.introMoviePaths,
-    enabledModNames: options.enabledModNames,
   });
 
   return { headPacks, externalPacks, warnings, statuses };

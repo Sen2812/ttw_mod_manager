@@ -25,7 +25,7 @@ export const WH3: GameDefinition = {
     "movies\\startup_movie_03.ca_vp8",
     "movies\\startup_movie_04.ca_vp8",
   ],
-  supportedOptions: ["MakeUnitsGenerals", "SkipIntroMovies", "PlbuffInjection", "ScriptLogging", "AutoStartCustomBattle"],
+  supportedOptions: ["MakeUnitsGenerals", "SkipIntroMovies", "ScriptLogging", "AutoStartCustomBattle"],
 };
 
 export const WH2: GameDefinition = {

@@ -27,4 +27,4 @@ cd mods/wh3/ttw_campaign_helpers
 2. 启用本 mod：`ttw_campaign_helpers.pack`（可放入游戏 `data`，或作为本地/工坊 mod 在管理器中勾选）
 3. 启动游戏后在 MCT 中调节选项，载入/重载战役生效
 
-管理器「功能」页仅显示该辅助是否可用（需同时启用 MCT 与本 mod），**不再注入或打包**此内容。
+本 mod 独立于 TTW Mod Manager：管理器不描述、不注入、不打包此内容；在 Mod 列表中像普通 mod 一样启用即可。

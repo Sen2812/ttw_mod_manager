@@ -4,8 +4,6 @@ export * from "./registry";
 
 export * from "./paths";
 
-export * from "./unit-buff-features";
-
 export {
   DEFAULT_PLBUFF_OPTIONS,
   normalizePlbuffOptions,

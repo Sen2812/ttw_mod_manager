@@ -164,26 +164,12 @@ declare global {
       }>;
       getBuiltinFeatures: () => Promise<{
         features: Array<{
-          id: "skipIntro" | "plbuff";
+          id: "skipIntro";
           kind: "temp-pack" | "bundled-pack" | "external-pack";
           available: boolean;
           enabled: boolean;
           bundled: boolean;
-          mctEnabled?: boolean;
-          modEnabled?: boolean;
         }>;
-        unitBuffCatalog?: {
-          groups: Array<{ id: string; icon: string }>;
-          features: Array<{
-            key: string;
-            kind: "toggle" | "slider";
-            group: string;
-            min?: number;
-            max?: number;
-            step?: number;
-          }>;
-        };
-        campaignHelpersModPack?: string;
       }>;
       setPreferences: (patch: {
         isClosedOnPlay?: boolean;

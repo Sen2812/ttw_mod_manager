@@ -1,13 +1,13 @@
 import type { SupportedGame } from "../../types";
 
 /** Built-in auxiliary feature identifiers. */
-export type BuiltinFeatureId = "skipIntro" | "plbuff";
+export type BuiltinFeatureId = "skipIntro";
 
 /**
  * How a feature is applied at launch:
  * - temp-pack: manager generates a minimal override pack (e.g. skip intro)
  * - bundled-pack: manager stages a pack shipped with the app
- * - external-pack: requires user-enabled external packs (e.g. MCT companion mod)
+ * - external-pack: requires user-enabled external packs
  */
 export type BuiltinFeatureKind = "temp-pack" | "bundled-pack" | "external-pack";
 
@@ -15,8 +15,8 @@ export interface BuiltinFeatureDefinition {
   id: BuiltinFeatureId;
   games: SupportedGame[];
   kind: BuiltinFeatureKind;
-  /** Legacy preference flag on UserPreferences. */
-  preferenceKey: "isSkipIntroMoviesEnabled" | "isPlbuffInjectionEnabled";
+  /** Preference flag on UserPreferences. */
+  preferenceKey: "isSkipIntroMoviesEnabled";
   /** GameDefinition.supportedOptions entry gating this feature. */
   supportedOption: string;
 }
@@ -35,7 +35,7 @@ import type { PlbuffOptions } from "./plbuff-config";
 
 export interface BuiltinFeaturePreferences {
   isSkipIntroMoviesEnabled?: boolean;
-  /** @deprecated Campaign helpers no longer inject packs. */
+  /** @deprecated Unused — campaign helpers are an external MCT mod. */
   isPlbuffInjectionEnabled?: boolean;
   /** @deprecated Options live in MCT. */
   plbuffOptions?: Partial<PlbuffOptions>;
@@ -47,10 +47,6 @@ export interface BuiltinFeatureStatus {
   available: boolean;
   enabled: boolean;
   bundled: boolean;
-  /** Campaign helpers: MCT pack enabled. */
-  mctEnabled?: boolean;
-  /** Campaign helpers: companion mod enabled. */
-  modEnabled?: boolean;
 }
 
 export interface PrepareBuiltinFeaturesOptions {

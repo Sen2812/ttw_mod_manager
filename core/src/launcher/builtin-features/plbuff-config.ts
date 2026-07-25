@@ -3,37 +3,20 @@
  * Options are configured in MCT; these remain only for reading old config files.
  */
 
-import {
-  UNIT_BUFF_FEATURES,
-  type UnitBuffOptions,
-} from "./unit-buff-features";
-
-export type PlbuffOptions = UnitBuffOptions;
+export type PlbuffOptions = Record<string, boolean | number>;
 
 export function createDefaultPlbuffOptions(): PlbuffOptions {
-  const out: PlbuffOptions = {};
-  for (const f of UNIT_BUFF_FEATURES) {
-    out[f.key] = f.kind === "toggle"
-      ? (f.defaultBool ?? false)
-      : (f.defaultNumber ?? 0);
-  }
-  return out;
+  return {};
 }
 
 export const DEFAULT_PLBUFF_OPTIONS = createDefaultPlbuffOptions();
 
-export function normalizePlbuffOptions(raw?: Partial<UnitBuffOptions>): UnitBuffOptions {
-  const defaults = createDefaultPlbuffOptions();
-  if (!raw) return defaults;
-  const out = { ...defaults };
-  for (const f of UNIT_BUFF_FEATURES) {
-    const v = raw[f.key];
-    if (f.kind === "toggle") {
-      if (typeof v === "boolean") out[f.key] = v;
-    } else if (typeof v === "number" && !Number.isNaN(v)) {
-      const min = f.min ?? 0;
-      const max = f.max ?? 100;
-      out[f.key] = Math.min(max, Math.max(min, v));
+export function normalizePlbuffOptions(raw?: Partial<PlbuffOptions>): PlbuffOptions {
+  if (!raw) return createDefaultPlbuffOptions();
+  const out: PlbuffOptions = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "boolean" || (typeof value === "number" && !Number.isNaN(value))) {
+      out[key] = value;
     }
   }
   return out;

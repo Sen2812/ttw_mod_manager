@@ -13,9 +13,6 @@ import {
   getBuiltinFeatureStatuses,
   prepareBuiltinFeaturesForLaunch,
   resolveBuiltinFeaturesResourcesRoot,
-  UNIT_BUFF_FEATURE_GROUPS,
-  UNIT_BUFF_FEATURES,
-  CAMPAIGN_HELPERS_MOD_PACK_NAME,
 } from "../../core/src/launcher/builtin-features";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
@@ -662,31 +659,16 @@ function registerIpc() {
   ipcMain.handle("get-builtin-features", async () => {
     await ensureInit();
     const gameDef = mm.currentGame;
-    const folderPaths = mm.folderPaths;
     if (!gameDef) {
       return { features: [] as ReturnType<typeof getBuiltinFeatureStatuses> };
     }
-    const dataFolder = folderPaths?.dataFolder
-      ?? (folderPaths?.gamePath ? path.join(folderPaths.gamePath, "data") : undefined);
-    const enabledModNames = mm.getEnabledMods().map((mod) => mod.name);
     return {
       features: getBuiltinFeatureStatuses({
         gameId: gameDef.id,
         supportedOptions: gameDef.supportedOptions,
-        resourcesRoot: getBuiltinFeaturesResourcesRoot(),
-        dataFolder,
-        contentFolder: folderPaths?.contentFolder,
         preferences: mm.config.preferences,
         introMoviePaths: gameDef.introMovies,
-        enabledModNames,
       }),
-      unitBuffCatalog: {
-        groups: UNIT_BUFF_FEATURE_GROUPS,
-        features: UNIT_BUFF_FEATURES.map(({ key, kind, group, min, max, step }) => ({
-          key, kind, group, min, max, step,
-        })),
-      },
-      campaignHelpersModPack: CAMPAIGN_HELPERS_MOD_PACK_NAME,
     };
   });
 
