@@ -9,14 +9,21 @@
  */
 
 import { GameFolderPaths, Mod, Preset, SupportedGame } from "../types";
+import { DEFAULT_PLBUFF_OPTIONS, type PlbuffOptions } from "../launcher/builtin-features/plbuff-config";
 
 // ─── Config Schema ────────────────────────────────────────────────────────────
+
+export type { PlbuffOptions };
 
 /** User preferences that persist across sessions */
 export interface UserPreferences {
   isClosedOnPlay: boolean;
   /** Replace intro cinematics with empty stubs on launch (when supported). */
   isSkipIntroMoviesEnabled: boolean;
+  /** @deprecated Unused — campaign helpers are an external MCT mod. */
+  isPlbuffInjectionEnabled: boolean;
+  /** @deprecated Options live in MCT; kept for reading old config files. */
+  plbuffOptions: PlbuffOptions;
 }
 
 /** The complete app configuration that gets persisted */
@@ -48,6 +55,8 @@ export function createDefaultConfig(currentGame: SupportedGame = "wh3"): AppConf
     preferences: {
       isClosedOnPlay: false,
       isSkipIntroMoviesEnabled: false,
+      isPlbuffInjectionEnabled: false,
+      plbuffOptions: { ...DEFAULT_PLBUFF_OPTIONS },
     },
     gameFolderPaths: {} as Record<SupportedGame, GameFolderPaths>,
     gamePresets: {} as Record<SupportedGame, Preset[]>,
@@ -136,12 +145,17 @@ export class ConfigManager {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppConfig>;
         const defaults = createDefaultConfig(currentGame);
+        const prefs = parsed.preferences ?? {};
         this.cache = {
           ...defaults,
           ...parsed,
           preferences: {
             ...defaults.preferences,
-            ...parsed.preferences,
+            ...prefs,
+            plbuffOptions: {
+              ...defaults.preferences.plbuffOptions,
+              ...(prefs as Partial<UserPreferences>).plbuffOptions,
+            },
           },
         };
         return this.cache;

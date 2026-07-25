@@ -36,6 +36,7 @@ const api = {
   importProfileOrder: (mods) => ipcRenderer.invoke("import-profile-order", mods),
   getDataDir: () => ipcRenderer.invoke("get-data-dir"),
   getPreferences: () => ipcRenderer.invoke("get-preferences"),
+  getBuiltinFeatures: () => ipcRenderer.invoke("get-builtin-features"),
   setPreferences: (patch) => ipcRenderer.invoke("set-preferences", patch),
   selectDataDir: () => ipcRenderer.invoke("select-data-dir"),
   setDataDir: (d) => ipcRenderer.invoke("set-data-dir", d),

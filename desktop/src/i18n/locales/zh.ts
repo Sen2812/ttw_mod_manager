@@ -322,12 +322,10 @@ export const zh: Record<string, string> = {
 
   // ─── 辅助功能 ────────────────────────────────────────────────────────
   "features.title": "辅助功能",
-  "features.desc": "从这里启动游戏时，可以顺便开启以下便利选项。",
   "features.launchOptions": "启动选项",
   "features.skipIntro": "跳过片头动画",
   "features.skipIntroDesc": "跳过开场动画，更快进入主菜单。",
   "features.skipIntroUnsupported": "《{game}》暂不支持跳过片头。",
-  "features.tip": "这些选项只在启动时生效，不会改动你的 Mod 列表。",
 
   // ─── 冲突详情 ────────────────────────────────────────────────────────
   "compat.panelTitle": "Mod 冲突",

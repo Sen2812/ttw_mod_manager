@@ -76,3 +76,18 @@ coverage/
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Temporary RPFM / pack extracts and local experiments
+.tmp_*/
+
+# Accidental UI dumps outside desktop/resources
+desktop/ui/
+
+# Third-party / research mod sample extracts (not project source)
+docs/mod_samples/
+
+# Companion mod build artifacts (source under mods/*/src is tracked)
+mods/**/*.pack
+
+# Legacy bundled feature packs (campaign helpers live under mods/)
+desktop/resources/builtin-features/**/*.pack

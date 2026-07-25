@@ -1,0 +1,8 @@
+phase	stat	value	how
+#special_ability_phase_stat_effects_tables;3;db/special_ability_phase_stat_effects_tables/ttw_unit_buffs_cav_charge			
+ttw_unit_buffs_cav_charge_1	scalar_entity_acceleration_modifier	2.0000	mult
+ttw_unit_buffs_cav_charge_1	stat_mass	2.0000	mult
+ttw_unit_buffs_cav_charge_2	scalar_entity_acceleration_modifier	4.0000	mult
+ttw_unit_buffs_cav_charge_2	stat_mass	4.0000	mult
+ttw_unit_buffs_cav_charge_3	scalar_entity_acceleration_modifier	8.0000	mult
+ttw_unit_buffs_cav_charge_3	stat_mass	8.0000	mult

@@ -322,12 +322,10 @@ export const en: Record<string, string> = {
 
   // ─── Features ────────────────────────────────────────────────────────
   "features.title": "Extras",
-  "features.desc": "Optional conveniences when you launch the game from this app.",
   "features.launchOptions": "When launching",
   "features.skipIntro": "Skip intro videos",
   "features.skipIntroDesc": "Skip opening cinematics and get to the main menu faster.",
   "features.skipIntroUnsupported": "Skip intro is not available for {game}.",
-  "features.tip": "These only apply when you launch from here. They won't change your mod list.",
 
   // ─── Overwrite Analysis ──────────────────────────────────────────────
   "compat.panelTitle": "Mod conflicts",
