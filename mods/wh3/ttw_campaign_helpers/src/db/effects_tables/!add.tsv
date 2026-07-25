@@ -1,0 +1,9 @@
+effect	icon	priority	icon_negative	category	is_positive_value_good
+#effects_tables;0;db/effects_tables/!add					
+ttw_unit_buffs_cavalry_lance	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_range_dig_in	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_infantry_shieldwall	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_cavalry_charge	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_enable_damage_reflect_t1	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_enable_damage_reflect_t2	general_ability.png	300	general_ability.png	battle	true
+ttw_unit_buffs_enable_damage_reflect_t3	general_ability.png	300	general_ability.png	battle	true

@@ -10,10 +10,13 @@ import { findSteamPath as coreFindSteamPath } from "../../core/src/mod-manager/m
 import { syncModsToLauncher } from "../../core/src/launcher/launcher-sync";
 import { generateUsedModsContent } from "../../core/src/launcher/used-mods";
 import {
-  START_GAME_PACK_DIR,
-  START_GAME_PACK_NAME,
-  writeSkipIntroPack,
-} from "../../core/src/launcher/start-game-pack";
+  getBuiltinFeatureStatuses,
+  prepareBuiltinFeaturesForLaunch,
+  resolveBuiltinFeaturesResourcesRoot,
+  UNIT_BUFF_FEATURE_GROUPS,
+  UNIT_BUFF_FEATURES,
+  CAMPAIGN_HELPERS_MOD_PACK_NAME,
+} from "../../core/src/launcher/builtin-features";
 import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
@@ -656,6 +659,37 @@ function registerIpc() {
     };
   });
 
+  ipcMain.handle("get-builtin-features", async () => {
+    await ensureInit();
+    const gameDef = mm.currentGame;
+    const folderPaths = mm.folderPaths;
+    if (!gameDef) {
+      return { features: [] as ReturnType<typeof getBuiltinFeatureStatuses> };
+    }
+    const dataFolder = folderPaths?.dataFolder
+      ?? (folderPaths?.gamePath ? path.join(folderPaths.gamePath, "data") : undefined);
+    const enabledModNames = mm.getEnabledMods().map((mod) => mod.name);
+    return {
+      features: getBuiltinFeatureStatuses({
+        gameId: gameDef.id,
+        supportedOptions: gameDef.supportedOptions,
+        resourcesRoot: getBuiltinFeaturesResourcesRoot(),
+        dataFolder,
+        contentFolder: folderPaths?.contentFolder,
+        preferences: mm.config.preferences,
+        introMoviePaths: gameDef.introMovies,
+        enabledModNames,
+      }),
+      unitBuffCatalog: {
+        groups: UNIT_BUFF_FEATURE_GROUPS,
+        features: UNIT_BUFF_FEATURES.map(({ key, kind, group, min, max, step }) => ({
+          key, kind, group, min, max, step,
+        })),
+      },
+      campaignHelpersModPack: CAMPAIGN_HELPERS_MOD_PACK_NAME,
+    };
+  });
+
   ipcMain.handle("set-preferences", async (_e, patch: {
     isClosedOnPlay?: boolean;
     isSkipIntroMoviesEnabled?: boolean;
@@ -1127,34 +1161,41 @@ function registerIpc() {
       if (!dataFolder) return { error: "Data folder not found" };
 
       const enabledMods = mm.getEnabledMods();
-      const skipIntro = mm.config.preferences.isSkipIntroMoviesEnabled ?? false;
-      const supportsSkipIntro = game.supportedOptions.includes("SkipIntroMovies") && game.introMovies.length > 0;
 
-      let startGamePack: { workDir: string; packName: string } | undefined;
-      if (skipIntro && supportsSkipIntro) {
-        const tempPackDir = path.join(dataDir, START_GAME_PACK_DIR);
-        const tempPackPath = path.join(tempPackDir, START_GAME_PACK_NAME);
-        try {
-          writeSkipIntroPack(tempPackPath, {
-            packHeader: game.packHeader,
-            introMoviePaths: game.introMovies,
-            supportsCompression: game.supportsCompression,
-          });
-          startGamePack = { workDir: tempPackDir, packName: START_GAME_PACK_NAME };
-          console.log(`[launcher] Wrote skip-intro pack to ${tempPackPath}`);
-        } catch (e: any) {
-          console.error(`[launcher] Failed to write skip-intro pack:`, e.message);
-        }
+      const builtin = prepareBuiltinFeaturesForLaunch({
+        gameId: game.id,
+        supportedOptions: game.supportedOptions,
+        packHeader: game.packHeader,
+        introMoviePaths: game.introMovies,
+        supportsCompression: game.supportsCompression,
+        appDataFolderName: game.appDataFolderName,
+        dataDir,
+        dataFolder,
+        contentFolder: mm.folderPaths?.contentFolder,
+        resourcesRoot: getBuiltinFeaturesResourcesRoot(),
+        preferences: mm.config.preferences,
+        enabledModNames: enabledMods.map((mod) => mod.name),
+      });
+      for (const warning of builtin.warnings) {
+        console.warn(`[launcher] ${warning}`);
+      }
+      if (builtin.headPacks.length > 0 || builtin.externalPacks.length > 0) {
+        console.log(
+          `[launcher] Built-in features: head=${builtin.headPacks.map((p) => p.packName).join(", ") || "—"}`
+          + ` external=${builtin.externalPacks.map((p) => p.packName).join(", ") || "—"}`,
+        );
       }
 
       // ── 1. 生成 used_mods.txt 内容 ──
-      // UI 列表越靠下优先级越高；写入 used_mods.txt / moddata 时会映射为
-      // CA 启动器语义（越靠前 = 优先级越高）。
       const isLinux = process.platform === "linux";
       const { text: usedModsText, modsToCopyToData } = generateUsedModsContent(
         enabledMods,
         dataFolder,
-        { isLinux, startGamePack },
+        {
+          isLinux,
+          headPacks: builtin.headPacks,
+          externalPacks: builtin.externalPacks,
+        },
       );
 
       // ── 2. 复制 data/modding/ 的 mod 到 data/ 目录 ──
@@ -1251,6 +1292,7 @@ function registerIpc() {
         success: true,
         modsCount: enabledMods.length,
         copyFailures,
+        auxiliaryWarnings: builtin.warnings,
         closeOnPlay,
       };
     } catch (e: any) {
@@ -1262,6 +1304,16 @@ function registerIpc() {
 }
 
 // ─── 窗口 ────────────────────────────────────────────────────────────────────
+
+function getBuiltinFeaturesResourcesRoot(): string {
+  if (app.isPackaged) return process.resourcesPath;
+  return resolveBuiltinFeaturesResourcesRoot([
+    path.join(__dirname, "../resources"),
+    path.join(app.getAppPath(), "resources"),
+    path.join(process.cwd(), "resources"),
+    path.join(process.cwd(), "desktop", "resources"),
+  ]);
+}
 
 function getAppIconPath(): string {
   if (app.isPackaged) return path.join(process.resourcesPath, "icon.png");

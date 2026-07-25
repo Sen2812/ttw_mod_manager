@@ -34,7 +34,10 @@ export interface AppConfigResponse {
   folderPaths?: { gamePath?: string; contentFolder?: string; dataFolder?: string };
   subscribedWorkshopIds?: string[];
   dataDir?: string;
-  preferences?: { isClosedOnPlay: boolean; isSkipIntroMoviesEnabled?: boolean };
+  preferences?: {
+    isClosedOnPlay: boolean;
+    isSkipIntroMoviesEnabled?: boolean;
+  };
 }
 
 export interface BootstrapResponse extends AppConfigResponse {
@@ -155,13 +158,42 @@ declare global {
         copyFailures?: string[];
         closeOnPlay?: boolean;
       }>;
-      getPreferences: () => Promise<{ isClosedOnPlay: boolean; isSkipIntroMoviesEnabled: boolean }>;
+      getPreferences: () => Promise<{
+        isClosedOnPlay: boolean;
+        isSkipIntroMoviesEnabled: boolean;
+      }>;
+      getBuiltinFeatures: () => Promise<{
+        features: Array<{
+          id: "skipIntro" | "plbuff";
+          kind: "temp-pack" | "bundled-pack" | "external-pack";
+          available: boolean;
+          enabled: boolean;
+          bundled: boolean;
+          mctEnabled?: boolean;
+          modEnabled?: boolean;
+        }>;
+        unitBuffCatalog?: {
+          groups: Array<{ id: string; icon: string }>;
+          features: Array<{
+            key: string;
+            kind: "toggle" | "slider";
+            group: string;
+            min?: number;
+            max?: number;
+            step?: number;
+          }>;
+        };
+        campaignHelpersModPack?: string;
+      }>;
       setPreferences: (patch: {
         isClosedOnPlay?: boolean;
         isSkipIntroMoviesEnabled?: boolean;
       }) => Promise<{
         ok: boolean;
-        preferences: { isClosedOnPlay: boolean; isSkipIntroMoviesEnabled: boolean };
+        preferences: {
+          isClosedOnPlay: boolean;
+          isSkipIntroMoviesEnabled: boolean;
+        };
       }>;
       saveUiState: (s: any) => Promise<{ ok: boolean }>;
       saveModState: (m: Mod[]) => Promise<{ ok: boolean }>;
