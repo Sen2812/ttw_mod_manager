@@ -26,6 +26,8 @@ export interface WorkshopItemData {
   tags?: { tag: string }[] | string[];
   /** Workshop item last update time (ms since epoch). */
   timeUpdated?: number;
+  /** Public preview image URL from Steam Web API (not always present in local UGC folder). */
+  previewUrl?: string;
   /** Cached required mod workshop IDs from Steam client UGC children. */
   requiredIds?: string[];
   /** Cache schema generation for requiredIds (see REQUIRED_IDS_CACHE_GENERATION). */
@@ -242,6 +244,8 @@ export class WorkshopCache {
         existing.timeUpdated = patch.timeUpdated;
         existing.timeUpdatedFetchedAt = now;
       }
+      if (patch.previewUrl) existing.previewUrl = patch.previewUrl;
+      if (patch.consumerAppId !== undefined) existing.consumerAppId = patch.consumerAppId;
       existing.metadataFetchedAt = now;
       this.entries.set(id, existing);
     }

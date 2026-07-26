@@ -133,6 +133,7 @@ export async function fetchWorkshopMetadata(
           result?: number;
           time_updated?: number | string;
           consumer_app_id?: number;
+          preview_url?: string;
         };
         const resultCode = raw.result ?? 1;
         if (resultCode !== 1) {
@@ -145,13 +146,17 @@ export async function fetchWorkshopMetadata(
         const timeUpdated = raw.time_updated != null
           ? Number(raw.time_updated) * 1000
           : undefined;
-        if (!item.title && timeUpdated === undefined) continue;
+        const previewUrl = typeof raw.preview_url === "string" && raw.preview_url.trim()
+          ? raw.preview_url.trim()
+          : undefined;
+        if (!item.title && timeUpdated === undefined && !previewUrl) continue;
         result.set(item.publishedfileid, {
           publishedfileid: item.publishedfileid,
           title: item.title,
           tags: item.tags,
           creator: item.creator,
           timeUpdated,
+          previewUrl,
           consumerAppId: raw.consumer_app_id != null ? Number(raw.consumer_app_id) : undefined,
         });
       }

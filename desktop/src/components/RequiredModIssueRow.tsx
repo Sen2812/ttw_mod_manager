@@ -5,7 +5,6 @@ import { DownloadCloud, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import type { DependencyIssue } from "@core/mod-manager/dependency-checker";
 import type { Mod } from "../types";
-import { useSteamStatus, isSteamWorkshopOnline } from "../hooks/useSteamStatus";
 
 function shortPack(name: string): string {
   return name.replace(/\.pack$/i, "");
@@ -20,8 +19,6 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const steamStatus = useSteamStatus();
-  const steamOnline = isSteamWorkshopOnline(steamStatus);
 
   const handleEnable = async () => {
     if (!issue.matchedModName || busy) return;
@@ -37,7 +34,7 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
   };
 
   const handleSteamWorkshop = async () => {
-    if (issue.kind !== "workshop" || busy || !steamOnline) return;
+    if (issue.kind !== "workshop" || busy) return;
     setBusy(true);
     setActionError(null);
     try {
@@ -113,8 +110,7 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
         <button
           type="button"
           onClick={handleSteamWorkshop}
-          disabled={busy || !steamOnline}
-          title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
+          disabled={busy}
           className="btn-morandi-accent-soft"
         >
           {busy
@@ -138,8 +134,7 @@ export default function RequiredModIssueRow({ issue, onModsUpdated }: RequiredMo
         <button
           type="button"
           onClick={handleSteamWorkshop}
-          disabled={busy || !steamOnline}
-          title={!steamOnline ? t("steamStatus.offlineTooltip") : undefined}
+          disabled={busy}
           className="btn-morandi-warning-soft"
         >
           {busy

@@ -18,6 +18,7 @@ import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
 import { workshopFolderHasValidPack } from "../../core/src/mod-manager/mod-discovery";
+import { ensureWorkshopPreviewImage } from "../../core/src/mod-manager/workshop-preview";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
 import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
 import {
@@ -25,11 +26,12 @@ import {
   fetchSubscribedWorkshopIdsViaSteam,
   triggerWorkshopDownloadsViaSteam,
   getWorkshopItemStatusesViaSteam,
-  probeSteamIpc,
   isWorkshopDownloadInProgress,
+  isSteamIpcErrorMessage,
   type WorkshopDownloadTriggerResult,
 } from "./steam-client";
 import { getSteamClientStatus } from "./steam-status";
+import { isSteamIpcUnavailableError } from "../../core/src/mod-manager/steam-ipc-error";
 
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
@@ -153,44 +155,15 @@ function notifyPrerequisitesCheckDone(modName: string): void {
 /** Run prerequisite fetch in background so toggle/enable IPC returns immediately. */
 function runModPrerequisitesCheck(modName: string): void {
   void (async () => {
-    const steamOk = await isSteamIpcAvailable();
-    if (steamOk) {
-      notifyPrerequisitesCheckStarted(modName);
-      try {
-        await mm.ensureModPrerequisites(modName);
-        notifyModsUpdated();
-      } catch (e) {
-        appLog(`Prerequisites check failed for ${modName}: ${e}`);
-      }
+    notifyPrerequisitesCheckStarted(modName);
+    try {
+      await mm.ensureModPrerequisites(modName);
+      notifyModsUpdated();
+    } catch (e) {
+      appLog(`Prerequisites check failed for ${modName}: ${e}`);
     }
     notifyPrerequisitesCheckDone(modName);
   })();
-}
-
-let cachedSteamIpc: { available: boolean; at: number } | null = null;
-const STEAM_IPC_CACHE_MS = 30_000;
-
-function recordSteamIpcAvailable(available: boolean): void {
-  cachedSteamIpc = { available, at: Date.now() };
-}
-
-function invalidateSteamIpcCache(): void {
-  cachedSteamIpc = null;
-}
-
-async function isSteamIpcAvailable(): Promise<boolean> {
-  const now = Date.now();
-  if (cachedSteamIpc && now - cachedSteamIpc.at < STEAM_IPC_CACHE_MS) {
-    return cachedSteamIpc.available;
-  }
-  const appId = getCurrentSteamAppId();
-  if (!appId) {
-    recordSteamIpcAvailable(false);
-    return false;
-  }
-  const probe = await probeSteamIpc(appId);
-  recordSteamIpcAvailable(probe.ok);
-  return probe.ok;
 }
 
 function getCurrentSteamAppId(): number | undefined {
@@ -245,7 +218,7 @@ function stopPendingDownloadPoll(): void {
 
 async function applyPendingDownloadStatus(mods: Mod[]): Promise<Mod[]> {
   const appId = getCurrentSteamAppId();
-  if (!appId || !(await isSteamIpcAvailable())) return mods;
+  if (!appId) return mods;
   const pending = mods.filter(m => m.pendingDownload && m.workshopId);
   if (pending.length === 0) return mods;
 
@@ -426,7 +399,7 @@ function modHasLocalPack(mod: Mod): boolean {
 
 /**
  * Ask Steam to update a workshop item without deleting local files.
- * Keeps the existing .pack usable when the download fails or has not finished.
+ * Also fills a missing cover via Steam Web API preview_url (UGC often has no image).
  */
 async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
   ok: boolean;
@@ -440,6 +413,7 @@ async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
 
   const hadLocalPack = modHasLocalPack(mod);
   const appId = getCurrentSteamAppId();
+  const contentFolder = mm.folderPaths?.contentFolder;
   if (!appId) {
     return hadLocalPack
       ? { ok: true, downloadTriggered: false }
@@ -453,6 +427,15 @@ async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
     const results = await triggerWorkshopDownloadsViaSteam(appId, [mod.workshopId]);
     const trigger = results.get(mod.workshopId);
     const downloadTriggered = trigger ? workshopDownloadQueued(trigger) : false;
+
+    if (contentFolder) {
+      const previewPath = await ensureWorkshopPreviewImage(mod.workshopId, contentFolder, appLog);
+      if (previewPath) {
+        const live = mm.mods.find(m => m.workshopId === mod.workshopId);
+        if (live) live.imgPath = previewPath;
+        mod.imgPath = previewPath;
+      }
+    }
 
     if (!downloadTriggered && !hadLocalPack) {
       unlockPendingDownload(mod.workshopId);
@@ -483,10 +466,13 @@ async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
     if (hadLocalPack) {
       return { ok: true, downloadTriggered: false };
     }
+    const message = e instanceof Error ? e.message : String(e);
     return {
       ok: false,
-      error: e instanceof Error ? e.message : String(e),
-      errorCode: "STEAM_DOWNLOAD_FAILED",
+      error: message,
+      errorCode: isSteamIpcUnavailableError(e) || isSteamIpcErrorMessage(message)
+        ? "STEAM_UNAVAILABLE"
+        : "STEAM_DOWNLOAD_FAILED",
     };
   }
 }
@@ -619,9 +605,7 @@ function registerIpc() {
 
   ipcMain.handle("get-steam-status", async () => {
     const appId = getCurrentSteamAppId();
-    const status = await getSteamClientStatus(appId);
-    recordSteamIpcAvailable(status.ipcAvailable);
-    return status;
+    return getSteamClientStatus(appId);
   });
 
   // ── 配置 ─────────────────────────────────────────────────────────────────
@@ -838,16 +822,6 @@ function registerIpc() {
     if (!appId || !/^\d{5,15}$/.test(workshopId)) {
       return { ok: false, error: "INVALID", errorCode: "INVALID", mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds };
     }
-    if (!(await isSteamIpcAvailable())) {
-      invalidateSteamIpcCache();
-      return {
-        ok: false,
-        error: "Steam unavailable",
-        errorCode: "STEAM_UNAVAILABLE",
-        mods: mm.getMods(),
-        subscribedWorkshopIds: mm.subscribedWorkshopIds,
-      };
-    }
     const payload = () => ({ mods: mm.getMods(), subscribedWorkshopIds: mm.subscribedWorkshopIds });
     try {
       if (pendingDownloadLocked.has(workshopId)) {
@@ -862,7 +836,6 @@ function registerIpc() {
       const trigger = results.get(workshopId);
       if (trigger && !workshopDownloadQueued(trigger)) {
         unlockPendingDownload(workshopId);
-        invalidateSteamIpcCache();
         await mm.scanMods(scanWhileDownloadingOpts);
         return {
           ok: false,
@@ -878,8 +851,11 @@ function registerIpc() {
       return { ok: true, ...payload() };
     } catch (e: any) {
       unlockPendingDownload(workshopId);
-      invalidateSteamIpcCache();
-      return { ok: false, error: e?.message ?? String(e), errorCode: "STEAM_DOWNLOAD_FAILED", ...payload() };
+      const message = e?.message ?? String(e);
+      const errorCode = isSteamIpcUnavailableError(e) || isSteamIpcErrorMessage(message)
+        ? "STEAM_UNAVAILABLE"
+        : "STEAM_DOWNLOAD_FAILED";
+      return { ok: false, error: message, errorCode, ...payload() };
     }
   });
   ipcMain.handle("force-update-all-outdated", async () => {

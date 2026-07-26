@@ -12,6 +12,7 @@ import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
 import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, type ScanModsOptions } from "./mod-discovery";
 import { fetchWorkshopTitlesForIds } from "./workshop-title-fetch";
+import { fillMissingWorkshopPreviews } from "./workshop-preview";
 import {
   countOutdatedMods,
   isModOutdated,
@@ -230,7 +231,7 @@ export class ModManager {
     return this.mods;
   }
 
-  /** Fetch deferred workshop metadata, prerequisites, and update timestamps. */
+  /** Fetch deferred workshop metadata, prerequisites, update timestamps, and missing covers. */
   async enrichWorkshopNetwork(): Promise<void> {
     if (!this.currentGame) return;
     await enrichWorkshopNetwork(
@@ -240,6 +241,10 @@ export class ModManager {
       this.subscribedWorkshopIds,
       this.log,
     );
+    const contentFolder = this.folderPaths?.contentFolder;
+    if (contentFolder) {
+      await fillMissingWorkshopPreviews(this.mods, contentFolder, this.log);
+    }
     this.mods = sortByLoadOrder(this.mods);
     for (const mod of this.mods) normalizeModTagFields(mod);
   }
