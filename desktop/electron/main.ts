@@ -182,6 +182,8 @@ let lastDownloadProgressRefresh = 0;
 const PENDING_POLL_MS = 15_000;
 const DOWNLOAD_PROGRESS_REFRESH_MS = 60_000;
 const STUCK_DOWNLOAD_RETRY_MS = 45_000;
+/** Stop watching a force-update lock if still outdated after this long. */
+const FORCE_UPDATE_WATCH_MS = 5 * 60_000;
 
 function lockPendingDownload(workshopId: string): void {
   pendingDownloadLocked.add(workshopId);
@@ -314,7 +316,11 @@ async function pollPendingDownloads(): Promise<void> {
   try {
     await ensureInit();
     const pending = mm.getMods().filter(m => m.pendingDownload && m.workshopId);
-    if (pending.length === 0) {
+    const lockedIds = [...pendingDownloadLocked];
+
+    // Force-updates of existing packs lock an id but do not set pendingDownload.
+    // Keep polling those until local mtime catches up (or the lock is cleared).
+    if (pending.length === 0 && lockedIds.length === 0) {
       stopPendingDownloadPoll();
       return;
     }
@@ -349,8 +355,9 @@ async function pollPendingDownloads(): Promise<void> {
 
     if (packReady) {
       await mm.scanMods(scanWhileDownloadingOpts);
+      await mm.checkModUpdates(true);
       notifyModsUpdated();
-      if (!mm.getMods().some(m => m.pendingDownload)) {
+      if (!mm.getMods().some(m => m.pendingDownload) && pendingDownloadLocked.size === 0) {
         stopPendingDownloadPoll();
       }
       return;
@@ -360,6 +367,26 @@ async function pollPendingDownloads(): Promise<void> {
       lastDownloadProgressRefresh = now;
       mm.mods = await applyPendingDownloadStatus(mm.getMods());
       notifyModsUpdated();
+    }
+
+    // Refresh local pack mtimes for in-progress force updates / outdated locked items.
+    if (lockedIds.length > 0) {
+      await mm.checkModUpdates(false);
+      for (const id of [...pendingDownloadLocked]) {
+        const mod = mm.getMods().find(m => m.workshopId === id);
+        const lockedAt = pendingDownloadLockedAt.get(id) ?? 0;
+        if (mod && !mod.pendingDownload && !isModOutdated(mod)) {
+          unlockPendingDownload(id);
+        } else if (!mod?.pendingDownload && now - lockedAt > FORCE_UPDATE_WATCH_MS) {
+          appLog(`Force update watch expired for ${id}`);
+          unlockPendingDownload(id);
+        }
+      }
+      notifyModsUpdated();
+      if (pendingDownloadLocked.size === 0 && !mm.getMods().some(m => m.pendingDownload)) {
+        stopPendingDownloadPoll();
+        return;
+      }
     }
 
     const appId = getCurrentSteamAppId();
@@ -377,6 +404,9 @@ async function pollPendingDownloads(): Promise<void> {
         if (finished) {
           await mm.scanMods(scanWhileDownloadingOpts);
           await mm.checkModUpdates(true);
+          for (const mod of outdated) {
+            if (!isModOutdated(mod)) unlockPendingDownload(mod.workshopId);
+          }
           notifyModsUpdated();
         }
       } catch {
