@@ -93,6 +93,7 @@ React (renderer)  ←window.api→  preload.cjs  ←IPC→  main.ts  →  ModMan
   - `setWorkshopRequiredIdsFetcher` — 依赖 mod ID
   - `setWorkshopSubscriptionsFetcher` — 已订阅 ID 列表
 - Steam 离线 / IPC 不可用时，依赖查询会降级；Workshop **下载/更新直接尝试**（对齐 WH3MM，无前置 ping 门禁）。`SteamStatusHint` 仅提示，不禁用操作。
+- **强制更新**只触发 Steam 下载（保留本地 pack）；缺封面时用 Web API `preview_url` 补全。启动后台 enrichment 也会批量补缺图。
 
 ### 数据持久化
 

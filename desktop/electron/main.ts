@@ -18,6 +18,7 @@ import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
 import { workshopFolderHasValidPack } from "../../core/src/mod-manager/mod-discovery";
+import { ensureWorkshopPreviewImage } from "../../core/src/mod-manager/workshop-preview";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
 import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
 import {
@@ -398,7 +399,7 @@ function modHasLocalPack(mod: Mod): boolean {
 
 /**
  * Ask Steam to update a workshop item without deleting local files.
- * Keeps the existing .pack usable when the download fails or has not finished.
+ * Also fills a missing cover via Steam Web API preview_url (UGC often has no image).
  */
 async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
   ok: boolean;
@@ -412,6 +413,7 @@ async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
 
   const hadLocalPack = modHasLocalPack(mod);
   const appId = getCurrentSteamAppId();
+  const contentFolder = mm.folderPaths?.contentFolder;
   if (!appId) {
     return hadLocalPack
       ? { ok: true, downloadTriggered: false }
@@ -425,6 +427,15 @@ async function forceWorkshopUpdateViaSteam(mod: Mod): Promise<{
     const results = await triggerWorkshopDownloadsViaSteam(appId, [mod.workshopId]);
     const trigger = results.get(mod.workshopId);
     const downloadTriggered = trigger ? workshopDownloadQueued(trigger) : false;
+
+    if (contentFolder) {
+      const previewPath = await ensureWorkshopPreviewImage(mod.workshopId, contentFolder, appLog);
+      if (previewPath) {
+        const live = mm.mods.find(m => m.workshopId === mod.workshopId);
+        if (live) live.imgPath = previewPath;
+        mod.imgPath = previewPath;
+      }
+    }
 
     if (!downloadTriggered && !hadLocalPack) {
       unlockPendingDownload(mod.workshopId);
