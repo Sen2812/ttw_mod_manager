@@ -62,8 +62,9 @@
       "package.json"
     ],
     "asarUnpack": [
-      "steamworks/**",
-      "dist-electron/steam-sub.cjs"
+      "steamworks/**/*",
+      "dist-electron/steam-sub.cjs",
+      "dist-electron/steam_api64.dll"
     ],
     "extraFiles": [
       {

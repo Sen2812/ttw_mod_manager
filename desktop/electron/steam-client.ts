@@ -23,15 +23,30 @@ export function isSteamIpcErrorMessage(message: string): boolean {
 /** Serialize steam-sub calls — concurrent steamworks.init() can disrupt active downloads. */
 let steamSubChain: Promise<unknown> = Promise.resolve();
 
+function isInsideAsar(filePath: string): boolean {
+  return filePath.replace(/\\/g, "/").includes(".asar/");
+}
+
+/**
+ * Resolve steam-sub.cjs for fork().
+ * Packaged builds must use the asar.unpacked copy — native steamworks cannot load from asar.
+ * Preferring `import.meta.url` first breaks production because main.js lives inside app.asar
+ * and existsSync() still finds steam-sub.cjs there.
+ */
 function resolveSteamSubPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    path.join(process.resourcesPath, "app.asar.unpacked", "dist-electron", "steam-sub.cjs"),
     path.join(here, "steam-sub.cjs"),
     path.join(app.getAppPath(), "dist-electron", "steam-sub.cjs"),
-    path.join(process.resourcesPath, "app.asar.unpacked", "dist-electron", "steam-sub.cjs"),
   ];
   for (const candidate of candidates) {
+    if (!candidate || isInsideAsar(candidate)) continue;
     if (fs.existsSync(candidate)) return candidate;
+  }
+  // Last resort (dev / unusual layouts): allow asar path only if nothing else exists.
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
   }
   return candidates[0];
 }
@@ -43,6 +58,16 @@ function runSteamSubOnce<T extends Record<string, unknown>>(
   timeoutMs = STEAM_SUB_TIMEOUT_MS,
 ): Promise<T> {
   const steamSubPath = resolveSteamSubPath();
+  if (!fs.existsSync(steamSubPath)) {
+    return Promise.reject(new Error(`steam-sub not found (looked for ${steamSubPath})`));
+  }
+  if (isInsideAsar(steamSubPath)) {
+    return Promise.reject(new Error(
+      `steam-sub resolved inside asar (${steamSubPath}); native Steam bindings require app.asar.unpacked`,
+    ));
+  }
+
+  // Parent of dist-electron/ — must contain unpacked steamworks/ next to it.
   const appRoot = path.dirname(path.dirname(steamSubPath));
   const args = extraArg !== undefined
     ? [String(appId), command, extraArg]
@@ -52,9 +77,19 @@ function runSteamSubOnce<T extends Record<string, unknown>>(
     const child = fork(steamSubPath, args, {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       cwd: appRoot,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
     });
 
     let settled = false;
+    let stderr = "";
+    child.stderr?.on("data", (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+    });
+
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
@@ -78,10 +113,11 @@ function runSteamSubOnce<T extends Record<string, unknown>>(
     child.once("error", (err) => finish(() => reject(err)));
     child.once("exit", (code) => {
       if (!settled) {
+        const detail = stderr.trim() ? `: ${stderr.trim()}` : "";
         finish(() => reject(new Error(
           code === 0
-            ? "steam-sub exited without response"
-            : `steam-sub exited with code ${code}`,
+            ? `steam-sub exited without response${detail}`
+            : `steam-sub exited with code ${code}${detail}`,
         )));
       }
     });

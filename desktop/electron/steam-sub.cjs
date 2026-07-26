@@ -1,10 +1,27 @@
 /**
  * Child process: Steamworks workshop queries (dependencies, subscribe, download).
  * argv: [appId, command, extraArg?]
+ *
+ * Must run from app.asar.unpacked (or repo desktop/) so native .node + steam_api64.dll load.
  */
 const fs = require("fs");
 const path = require("path");
-const steamworks = require(path.join(__dirname, "..", "steamworks", "index.js"));
+
+function resolveSteamworksIndex() {
+  const candidates = [
+    path.join(__dirname, "..", "steamworks", "index.js"),
+    path.join(__dirname, "steamworks", "index.js"),
+    path.join(process.cwd(), "steamworks", "index.js"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error(
+    `steamworks/index.js not found next to steam-sub (tried: ${candidates.join(" | ")})`,
+  );
+}
+
+const steamworks = require(resolveSteamworksIndex());
 
 const ITEM_SUBSCRIBED = 1;
 const ITEM_INSTALLED = 4;
