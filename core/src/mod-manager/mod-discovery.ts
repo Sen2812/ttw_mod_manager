@@ -266,6 +266,8 @@ export async function getWorkshopMetadata(
 
 /**
  * Refresh workshop `time_updated` for mods and apply to mod.lastChanged.
+ * Also re-stat local pack mtimes so post-download / manual checks clear "outdated"
+ * without requiring a full rescan.
  * Uses cache TTL unless `force` is true (manual check).
  */
 export async function checkWorkshopUpdates(
@@ -279,6 +281,8 @@ export async function checkWorkshopUpdates(
     mods.filter(m => m.workshopId && !m.isInData).map(m => m.workshopId),
   )];
   if (workshopIds.length === 0) return;
+
+  refreshLocalPackTimestamps(mods);
 
   const cache = existing ?? new WorkshopCache(cacheDir).load(log);
   const needsFetch = force ? workshopIds : cache.idsNeedingUpdateCheck(workshopIds);
@@ -300,6 +304,26 @@ export async function checkWorkshopUpdates(
   cache.save();
   applyWorkshopTimeUpdatedToMods(mods, cache.asMap());
   log?.("Workshop update check complete");
+}
+
+/** Re-read pack file mtime/size from disk into mod.lastChangedLocal / size. */
+export function refreshLocalPackTimestamps(mods: Mod[]): number {
+  let updated = 0;
+  for (const mod of mods) {
+    if (!mod.path || mod.pendingDownload) continue;
+    try {
+      if (!fs.existsSync(mod.path)) continue;
+      const stats = fs.statSync(mod.path);
+      if (mod.lastChangedLocal !== stats.mtimeMs || mod.size !== stats.size) {
+        mod.lastChangedLocal = stats.mtimeMs;
+        mod.size = stats.size;
+        updated++;
+      }
+    } catch {
+      /* ignore inaccessible packs */
+    }
+  }
+  return updated;
 }
 
 /** Fetch required mod IDs via the registered Steam client fetcher. */
