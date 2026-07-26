@@ -89,6 +89,7 @@ React (renderer)  ←window.api→  preload.cjs  ←IPC→  main.ts  →  ModMan
 ### Steam 集成
 
 - `steam-client.ts` 通过 **fork `steam-sub.cjs`** 串行调用 steamworks，避免并发 `init()` 干扰下载。
+- **打包版**必须从 `app.asar.unpacked/dist-electron/steam-sub.cjs` 启动子进程（原生模块不能从 asar 加载）；`steam_api64.dll` 需在安装目录及/或 `steamworks/dist/win64/`。
 - core 侧 Workshop 网络能力通过 **injectable fetcher** 注入：
   - `setWorkshopRequiredIdsFetcher` — 依赖 mod ID
   - `setWorkshopSubscriptionsFetcher` — 已订阅 ID 列表
