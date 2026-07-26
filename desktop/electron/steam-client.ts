@@ -119,13 +119,6 @@ export async function probeSteamIpc(appId: number): Promise<{ ok: boolean; error
   }
 }
 
-async function ensureSteamIpc(appId: number): Promise<void> {
-  const probe = await probeSteamIpc(appId);
-  if (!probe.ok) {
-    throw new SteamIpcUnavailableError(probe.error);
-  }
-}
-
 /** Fetch workshop required mod IDs via steamworks.js (Steam client must be running). */
 export async function fetchWorkshopDependenciesViaSteam(
   appId: number,
@@ -133,25 +126,35 @@ export async function fetchWorkshopDependenciesViaSteam(
 ): Promise<Map<string, string[]>> {
   if (workshopIds.length === 0) return new Map();
 
-  await ensureSteamIpc(appId);
-  const msg = await runSteamSub<Record<string, string[]>>(
-    appId,
-    "getDependencies",
-    workshopIds.join(","),
-  );
+  try {
+    const msg = await runSteamSub<Record<string, string[]>>(
+      appId,
+      "getDependencies",
+      workshopIds.join(","),
+    );
 
-  const map = new Map<string, string[]>();
-  for (const [id, deps] of Object.entries(msg)) {
-    if (Array.isArray(deps)) map.set(id, deps);
+    const map = new Map<string, string[]>();
+    for (const [id, deps] of Object.entries(msg)) {
+      if (Array.isArray(deps)) map.set(id, deps);
+    }
+    return map;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isSteamIpcErrorMessage(message)) throw new SteamIpcUnavailableError(message);
+    throw e;
   }
-  return map;
 }
 
 /** Fetch currently subscribed workshop item IDs via steamworks.js. */
 export async function fetchSubscribedWorkshopIdsViaSteam(appId: number): Promise<string[]> {
-  await ensureSteamIpc(appId);
-  const msg = await runSteamSub<{ ids?: string[] }>(appId, "getSubscribed");
-  return Array.isArray(msg.ids) ? msg.ids : [];
+  try {
+    const msg = await runSteamSub<{ ids?: string[] }>(appId, "getSubscribed");
+    return Array.isArray(msg.ids) ? msg.ids : [];
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isSteamIpcErrorMessage(message)) throw new SteamIpcUnavailableError(message);
+    throw e;
+  }
 }
 
 export interface WorkshopItemDownloadStatus {
@@ -189,18 +192,24 @@ export async function triggerWorkshopDownloadsViaSteam(
   workshopIds: string[],
 ): Promise<Map<string, WorkshopDownloadTriggerResult>> {
   if (workshopIds.length === 0) return new Map();
-  await ensureSteamIpc(appId);
-  const msg = await runSteamSub<{ results?: Record<string, WorkshopDownloadTriggerResult> }>(
-    appId,
-    "downloadItems",
-    workshopIds.join(","),
-    STEAM_DOWNLOAD_TIMEOUT_MS,
-  );
-  const map = new Map<string, WorkshopDownloadTriggerResult>();
-  for (const [id, result] of Object.entries(msg.results ?? {})) {
-    if (result) map.set(id, result);
+  // Match WH3MM: attempt download directly — no pre-flight ping that can false-negative.
+  try {
+    const msg = await runSteamSub<{ results?: Record<string, WorkshopDownloadTriggerResult> }>(
+      appId,
+      "downloadItems",
+      workshopIds.join(","),
+      STEAM_DOWNLOAD_TIMEOUT_MS,
+    );
+    const map = new Map<string, WorkshopDownloadTriggerResult>();
+    for (const [id, result] of Object.entries(msg.results ?? {})) {
+      if (result) map.set(id, result);
+    }
+    return map;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isSteamIpcErrorMessage(message)) throw new SteamIpcUnavailableError(message);
+    throw e;
   }
-  return map;
 }
 
 /** Query Steam download/install state for workshop items. */

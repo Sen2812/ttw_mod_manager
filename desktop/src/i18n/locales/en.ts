@@ -42,10 +42,10 @@ export const en: Record<string, string> = {
   "topbar.switchWithoutSaving": "Switch without saving",
   "topbar.gameSwitchErrorTitle": "Could not switch game",
   "steamStatus.label": "Steam",
-  "steamStatus.runningTooltip": "Steam is connected — Workshop features are available",
-  "steamStatus.offlineTooltip": "Steam is offline. Workshop features are unavailable until you go online.",
-  "steamStatus.notRunningTooltip": "Steam is not running. Workshop features may be unavailable.",
-  "steamStatus.notInstalledTooltip": "Steam was not found. Workshop features are unavailable.",
+  "steamStatus.runningTooltip": "Steam is connected",
+  "steamStatus.offlineTooltip": "Can't reach Steam right now (hint only — you can still try update/download)",
+  "steamStatus.notRunningTooltip": "Steam process not detected (hint only — you can still try update/download)",
+  "steamStatus.notInstalledTooltip": "Steam installation not found",
   "close.unsavedTitle": "Unsaved changes",
   "close.unsavedMsg": "Would you like to save your changes before exiting?",
 
@@ -397,7 +397,6 @@ export const en: Record<string, string> = {
   "dependency.action.downloading": "Downloading…",
   "dependency.action.notInstalled": "Not installed",
   "dependency.checking": "Checking required mods…",
-  "dependency.notCheckedOffline": "Steam is offline or not running — can't check right now",
 
   // ─── Workshop Updates ──────────────────────────────────────────────
   "update.title": "Workshop Update",

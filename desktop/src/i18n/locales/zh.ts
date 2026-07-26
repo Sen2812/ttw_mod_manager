@@ -42,10 +42,10 @@ export const zh: Record<string, string> = {
   "topbar.switchWithoutSaving": "不保存直接切换",
   "topbar.gameSwitchErrorTitle": "切换游戏失败",
   "steamStatus.label": "Steam",
-  "steamStatus.runningTooltip": "Steam 已连接，可以使用创意工坊功能",
-  "steamStatus.offlineTooltip": "Steam 处于离线状态，暂时无法使用创意工坊。请先上线。",
-  "steamStatus.notRunningTooltip": "Steam 未运行，创意工坊功能可能无法使用",
-  "steamStatus.notInstalledTooltip": "未检测到 Steam，创意工坊相关功能不可用",
+  "steamStatus.runningTooltip": "Steam 已连接",
+  "steamStatus.offlineTooltip": "暂时连不上 Steam（仅提示；仍可尝试更新/下载）",
+  "steamStatus.notRunningTooltip": "未检测到 Steam 进程（仅提示；仍可尝试更新/下载）",
+  "steamStatus.notInstalledTooltip": "未检测到 Steam 安装",
   "close.unsavedTitle": "有未保存的修改",
   "close.unsavedMsg": "退出前是否保存当前修改？",
 
@@ -397,7 +397,6 @@ export const zh: Record<string, string> = {
   "dependency.action.downloading": "下载中…",
   "dependency.action.notInstalled": "未安装",
   "dependency.checking": "正在检查需要的 Mod…",
-  "dependency.notCheckedOffline": "Steam 离线或未运行，暂时无法检查",
 
   // ─── 创意工坊更新 ────────────────────────────────────────────────────
   "update.title": "Mod 更新",

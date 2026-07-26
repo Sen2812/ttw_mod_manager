@@ -92,7 +92,7 @@ React (renderer)  ←window.api→  preload.cjs  ←IPC→  main.ts  →  ModMan
 - core 侧 Workshop 网络能力通过 **injectable fetcher** 注入：
   - `setWorkshopRequiredIdsFetcher` — 依赖 mod ID
   - `setWorkshopSubscriptionsFetcher` — 已订阅 ID 列表
-- Steam 离线 / IPC 不可用时，依赖查询与 Workshop 更新会降级；UI 有 `SteamStatusHint` 提示。
+- Steam 离线 / IPC 不可用时，依赖查询会降级；Workshop **下载/更新直接尝试**（对齐 WH3MM，无前置 ping 门禁）。`SteamStatusHint` 仅提示，不禁用操作。
 
 ### 数据持久化
 
