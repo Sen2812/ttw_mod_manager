@@ -46,6 +46,8 @@ let isConfirmingClose = false; // 防止重复弹窗
 let gameLaunchInProgress = false;
 
 const GAME_LAUNCH_COOLDOWN_MS = 3000;
+/** Working set below this is treated as a crashed/zombie leftover, not a live game. */
+const MIN_LIVE_GAME_WORKING_SET_BYTES = 5 * 1024 * 1024;
 
 for (const game of BUILTIN_GAMES) gameRegistry.register(game);
 
@@ -115,17 +117,85 @@ function buildBootstrapPayload() {
   };
 }
 
-/** Check whether the game executable is already running. */
+interface GameProcessInfo {
+  pid: number;
+  workingSet: number;
+}
+
+function processBaseName(processName: string): string {
+  return processName.replace(/\.exe$/i, "");
+}
+
+/** List matching processes with memory info (Windows). */
+function listWindowsGameProcesses(processName: string): GameProcessInfo[] {
+  try {
+    const output = execSync(`tasklist /FI "IMAGENAME eq ${processName}" /FO CSV /NH`, {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true,
+    });
+    if (!output.toLowerCase().includes(processName.toLowerCase())) {
+      return [];
+    }
+    return output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.toLowerCase().includes(processName.toLowerCase()))
+      .map((line) => {
+        // CSV: "Image Name","PID","Session Name","Session#","Mem Usage"
+        const cols = line.match(/"(.*?)"/g)?.map((s) => s.slice(1, -1));
+        if (!cols || cols.length < 5) return null;
+        const pid = Number(cols[1]);
+        // Mem Usage like "24 K" or "1,234,567 K" (locale separators vary)
+        const memMatch = cols[4].match(/([\d.,\s]+)\s*K/i);
+        const kb = memMatch ? Number(memMatch[1].replace(/[^\d]/g, "")) : 0;
+        const workingSet = Number.isFinite(kb) ? kb * 1024 : 0;
+        return { pid, workingSet };
+      })
+      .filter((p): p is GameProcessInfo => p != null && Number.isFinite(p.pid) && p.pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+function isLiveGameProcess(info: GameProcessInfo): boolean {
+  // Crashed Total War leftovers often remain in the process table with tiny working sets
+  // (e.g. ~24KB) while a real session is hundreds of MB+.
+  return info.workingSet >= MIN_LIVE_GAME_WORKING_SET_BYTES;
+}
+
+/** Kill crashed/zombie leftovers so launch is not blocked after a game crash. */
+function clearStaleGameProcesses(processName: string): number {
+  if (process.platform !== "win32") return 0;
+  const stale = listWindowsGameProcesses(processName).filter((p) => !isLiveGameProcess(p));
+  let killed = 0;
+  for (const proc of stale) {
+    try {
+      execSync(`taskkill /PID ${proc.pid} /F`, {
+        encoding: "utf8",
+        timeout: 5000,
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      killed++;
+      appLog(
+        `Cleared stale ${processName} pid=${proc.pid} `
+        + `(workingSet=${Math.round(proc.workingSet / 1024)}KB)`,
+      );
+    } catch (e) {
+      appLog(`Failed to clear stale ${processName} pid=${proc.pid}: ${e}`);
+    }
+  }
+  return killed;
+}
+
+/** True when a healthy game process is already running (ignores crash leftovers). */
 function isGameProcessRunning(processName: string): boolean {
   try {
     if (process.platform === "win32") {
-      const output = execSync(`tasklist /FI "IMAGENAME eq ${processName}" /FO CSV /NH`, {
-        encoding: "utf8",
-        timeout: 5000,
-      });
-      return output.toLowerCase().includes(processName.toLowerCase());
+      return listWindowsGameProcesses(processName).some(isLiveGameProcess);
     }
-    const baseName = processName.replace(/\.exe$/i, "");
+    const baseName = processBaseName(processName);
     execSync(`pgrep -x "${baseName}"`, { stdio: "ignore", timeout: 5000 });
     return true;
   } catch {
@@ -1134,6 +1204,10 @@ function registerIpc() {
     const game = mm.currentGame;
     if (!game) return { error: "No game selected" };
 
+    // Crash leftovers can linger in the process table with tiny working sets and
+    // block relaunch; clear those before the live-process check.
+    clearStaleGameProcesses(game.processName);
+
     if (isGameProcessRunning(game.processName)) {
       return { error: "Game is already running", errorCode: "GAME_ALREADY_RUNNING" };
     }
@@ -1243,6 +1317,7 @@ function registerIpc() {
         return { error: `Game executable not found: ${gameExePath}` };
       }
 
+      clearStaleGameProcesses(game.processName);
       if (isGameProcessRunning(game.processName)) {
         return { error: "Game is already running", errorCode: "GAME_ALREADY_RUNNING" };
       }
