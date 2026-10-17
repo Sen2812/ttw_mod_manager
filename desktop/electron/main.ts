@@ -989,6 +989,11 @@ function registerIpc() {
     mm.disableAll();
     return mm.getMods();
   });
+  ipcMain.handle("auto-sort-mods", async () => {
+    await ensureInit();
+    const summary = await mm.autoSortEnabledMods();
+    return { ok: true, mods: mm.getMods(), summary };
+  });
   ipcMain.handle("apply-drag-order", async (_e, names: string[]) => {
     await ensureInit();
     const mods = mm.getMods();

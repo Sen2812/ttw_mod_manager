@@ -122,6 +122,22 @@ declare global {
       disableAll: () => Promise<Mod[] | ApiResponse>;
       reorderMod: (n: string, i: number) => Promise<Mod[] | ApiResponse>;
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
+      autoSortMods: () => Promise<{
+        ok: boolean;
+        mods: Mod[];
+        summary: {
+          count: number;
+          moved: number;
+          duplicateTables: number;
+          dependencyLinks: number;
+          classes: {
+            content: number;
+            vanillaDb: number;
+            visual: number;
+            localization: number;
+          };
+        };
+      }>;
       getConfig: () => Promise<AppConfigResponse>;
       getSteamStatus: () => Promise<{
         installed: boolean;

@@ -41,6 +41,7 @@ import {
 } from "./preset-order";
 import { isUsableWorkshopTitle } from "./mod-display";
 import { importLocalPackFiles, deleteLocalModFiles, isLocalMod, type ImportLocalPacksResult, type DeleteLocalModResult } from "./local-pack-import";
+import { planEnabledAutoSort, type AutoSortSummary } from "./auto-sort";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
 
@@ -259,6 +260,27 @@ export class ModManager {
     }
     this.mods = sortByLoadOrder(this.mods);
     for (const mod of this.mods) normalizeModTagFields(mod);
+  }
+
+  /**
+   * Reorder enabled mods by pack contents.
+   * Disabled mods keep a stable order after the enabled list.
+   */
+  async autoSortEnabledMods(): Promise<AutoSortSummary> {
+    const { names, summary } = await planEnabledAutoSort(this.mods);
+    const order = new Map(names.map((name, index) => [name, index]));
+    let next = names.length;
+    for (const mod of this.mods) {
+      const enabledOrder = order.get(mod.name);
+      if (mod.isEnabled && enabledOrder !== undefined) mod.loadOrder = enabledOrder;
+      else if (!mod.isEnabled) mod.loadOrder = next++;
+    }
+    this.mods = sortByLoadOrder(this.mods);
+    this.log(
+      `Auto-sort: ${summary.count} enabled mod(s), ${summary.moved} moved, `
+      + `${summary.duplicateTables} duplicated table(s)`,
+    );
+    return summary;
   }
 
   /** Fetch workshop HTML titles for specific item IDs (on-demand, concurrent). */

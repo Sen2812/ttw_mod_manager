@@ -14,3 +14,4 @@ export * from "./workshop-preview";
 export * from "./mod-display";
 export * from "./preset-order";
 export * from "./local-pack-import";
+export * from "./auto-sort";

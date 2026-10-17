@@ -11,11 +11,12 @@ import { useStore } from "../store";
 import { useT } from "../i18n";
 import {
   GripVertical, Package, Info, ArrowDown, ArrowUp,
-  AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput, X, Plus,
+  AlertTriangle, DownloadCloud, RefreshCw, Loader2, FolderInput, X, Plus, ListOrdered,
 } from "lucide-react";
 import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
+import ConfirmDialog from "./ConfirmDialog";
 import ModListFiltersBar from "./ModListFiltersBar";
 import ModRowTags from "./ModRowTags";
 import { useModListVirtualizer, VirtualModRows } from "./VirtualModRows";
@@ -460,6 +461,8 @@ export default function ModList() {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [selectedMod, setSelectedMod] = useState<Mod | null>(null);
   const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [autoSortOpen, setAutoSortOpen] = useState(false);
+  const [autoSortBusy, setAutoSortBusy] = useState(false);
 
   useEffect(() => {
     if (!importMessage) return;
@@ -600,6 +603,32 @@ export default function ModList() {
       setImportMessage(t("modlist.workshopActionFailed", { error: String(e) }));
     }
   }, [setMods, t]);
+
+  const handleAutoSort = useCallback(async () => {
+    if (!window.api.autoSortMods) return;
+    setAutoSortBusy(true);
+    try {
+      const result = await window.api.autoSortMods();
+      if (Array.isArray(result.mods)) setMods(result.mods);
+      markDirty();
+      const classes = result.summary.classes;
+      setImportMessage(t("modlist.autoSortResult", {
+        count: result.summary.count,
+        moved: result.summary.moved,
+        content: classes.content,
+        vanillaDb: classes.vanillaDb,
+        visual: classes.visual,
+        localization: classes.localization,
+        duplicateTables: result.summary.duplicateTables,
+        dependencyLinks: result.summary.dependencyLinks,
+      }));
+      setAutoSortOpen(false);
+    } catch (e) {
+      setImportMessage(t("modlist.autoSortFailed", { error: String(e) }));
+    } finally {
+      setAutoSortBusy(false);
+    }
+  }, [markDirty, setMods, t]);
 
   const handleCheckUpdates = useCallback(async () => {
     setIsCheckingUpdates(true);
@@ -802,7 +831,19 @@ export default function ModList() {
             {t("update.updateAll")}
           </button>
         )}
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto shrink-0 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setAutoSortOpen(true)}
+            disabled={isScanning || autoSortBusy || profileMods.length === 0}
+            className="btn-morandi-ghost text-xs flex items-center gap-1"
+            title={t("modlist.autoSortTooltip")}
+          >
+            {autoSortBusy
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <ListOrdered className="w-3.5 h-3.5" />}
+            {t("modlist.autoSort")}
+          </button>
           <button
             type="button"
             className="icon-btn-accent"
@@ -924,6 +965,16 @@ export default function ModList() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={autoSortOpen}
+        busy={autoSortBusy}
+        title={t("modlist.autoSortConfirmTitle")}
+        message={t("modlist.autoSortConfirmMsg")}
+        confirmText={t("modlist.autoSort")}
+        onConfirm={() => { void handleAutoSort(); }}
+        onCancel={() => { if (!autoSortBusy) setAutoSortOpen(false); }}
+      />
 
       {selectedMod && mods.some(m => m.name === selectedMod.name) && (
         <ModDetailModal
