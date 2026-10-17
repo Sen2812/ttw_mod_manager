@@ -18,6 +18,7 @@ import { readPackIndex } from "../../core/src/pack-file/pack-index-reader";
 import { detectOverwrites } from "../../core/src/compat/overwrite-detector";
 import { countOutdatedMods, isModOutdated } from "../../core/src/mod-manager/workshop-update-status";
 import { workshopFolderHasValidPack } from "../../core/src/mod-manager/mod-discovery";
+import { resolveModWorkshopId } from "../../core/src/mod-manager/mod-display";
 import { ensureWorkshopPreviewImage } from "../../core/src/mod-manager/workshop-preview";
 import { setWorkshopRequiredIdsFetcher } from "../../core/src/mod-manager/workshop-required-fetcher";
 import { setWorkshopSubscriptionsFetcher } from "../../core/src/mod-manager/workshop-subscriptions-fetcher";
@@ -25,6 +26,7 @@ import {
   fetchWorkshopDependenciesViaSteam,
   fetchSubscribedWorkshopIdsViaSteam,
   triggerWorkshopDownloadsViaSteam,
+  unsubscribeWorkshopItemsViaSteam,
   getWorkshopItemStatusesViaSteam,
   isWorkshopDownloadInProgress,
   isSteamIpcErrorMessage,
@@ -243,6 +245,17 @@ function getCurrentSteamAppId(): number | undefined {
 }
 
 let pendingDownloadPollTimer: ReturnType<typeof setInterval> | null = null;
+let subscriptionSyncTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * Workshop items unsubscribed from this window. Hidden immediately after Steam
+ * accepts the unsubscribe, until the pack is gone or the user subscribes again.
+ */
+const sessionUnsubscribedIds = new Set<string>();
+/** When we asked Steam to unsubscribe; a stale subscribed-list during this window is ignored. */
+const recentlyUnsubscribedAt = new Map<string, number>();
+const SUBSCRIPTION_SYNC_MS = 20_000;
+const UNSUBSCRIBE_GRACE_MS = 3 * 60_000;
+let subscriptionSyncChain: Promise<void> = Promise.resolve();
 /** Workshop IDs with an active download request — never re-trigger until pack appears or force-update. */
 const pendingDownloadLocked = new Set<string>();
 const pendingDownloadLockedAt = new Map<string, number>();
@@ -274,6 +287,124 @@ function workshopDownloadQueued(result: WorkshopDownloadTriggerResult): boolean 
 
 function workshopFolderHasPack(contentFolder: string, workshopId: string): boolean {
   return workshopFolderHasValidPack(contentFolder, workshopId);
+}
+
+function rememberUnsubscribed(workshopIds: string[]): void {
+  const now = Date.now();
+  for (const id of workshopIds) {
+    sessionUnsubscribedIds.add(id);
+    recentlyUnsubscribedAt.set(id, now);
+  }
+}
+
+/** Remove rows for items unsubscribed in this session, even if the pack file is still on disk. */
+function stripSessionUnsubscribedMods(): number {
+  if (!mm || sessionUnsubscribedIds.size === 0) return 0;
+  const before = mm.mods.length;
+  mm.mods = mm.mods.filter((mod) => {
+    if (mod.isInData) return true;
+    const workshopId = resolveModWorkshopId(mod);
+    return !workshopId || !sessionUnsubscribedIds.has(workshopId);
+  });
+  mm.subscribedWorkshopIds = mm.subscribedWorkshopIds.filter(id => !sessionUnsubscribedIds.has(id));
+  return before - mm.mods.length;
+}
+
+function pruneFinishedUnsubscribes(liveSubscribedIds?: string[]): void {
+  const now = Date.now();
+  const live = new Set(liveSubscribedIds ?? []);
+  const contentFolder = mm.folderPaths?.contentFolder;
+  for (const id of [...sessionUnsubscribedIds]) {
+    const askedAt = recentlyUnsubscribedAt.get(id);
+    const stillInGrace = askedAt !== undefined && now - askedAt <= UNSUBSCRIBE_GRACE_MS;
+    if (live.has(id) && !stillInGrace) {
+      sessionUnsubscribedIds.delete(id);
+      recentlyUnsubscribedAt.delete(id);
+      continue;
+    }
+    if (contentFolder && !workshopFolderHasPack(contentFolder, id)) {
+      sessionUnsubscribedIds.delete(id);
+      recentlyUnsubscribedAt.delete(id);
+    }
+  }
+}
+
+function applyUnsubscribeGrace(ids: string[]): string[] {
+  const now = Date.now();
+  for (const [id, at] of recentlyUnsubscribedAt) {
+    if (now - at > UNSUBSCRIBE_GRACE_MS) recentlyUnsubscribedAt.delete(id);
+  }
+  if (recentlyUnsubscribedAt.size === 0) return ids;
+  return ids.filter(id => !recentlyUnsubscribedAt.has(id));
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const right = new Set(b);
+  return a.every(id => right.has(id));
+}
+
+/**
+ * Drop workshop mods whose subscription is gone and whose pack is no longer on disk.
+ * Installed files stay listed until Steam deletes them.
+ */
+function dropMissingUnsubscribedMods(subscribedIds: string[]): number {
+  const subscribed = new Set(subscribedIds);
+  const contentFolder = mm.folderPaths?.contentFolder;
+  const before = mm.mods.length;
+  mm.mods = mm.mods.filter((mod) => {
+    if (mod.isInData) return true;
+    const workshopId = resolveModWorkshopId(mod);
+    if (!workshopId) return true;
+    if (subscribed.has(workshopId)) return true;
+    if (!contentFolder) return true;
+    return workshopFolderHasPack(contentFolder, workshopId);
+  });
+  return before - mm.mods.length;
+}
+
+async function syncWorkshopSubscriptions(): Promise<{ ok: boolean; removed: number }> {
+  const run = subscriptionSyncChain.then(() => syncWorkshopSubscriptionsInner());
+  subscriptionSyncChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function syncWorkshopSubscriptionsInner(): Promise<{ ok: boolean; removed: number }> {
+  await ensureInit();
+  const appId = getCurrentSteamAppId();
+  if (!appId) return { ok: false, removed: 0 };
+
+  let ids: string[];
+  try {
+    const liveIds = await fetchSubscribedWorkshopIdsViaSteam(appId);
+    pruneFinishedUnsubscribes(liveIds);
+    ids = applyUnsubscribeGrace(liveIds);
+  } catch (e) {
+    appLog(`Workshop subscription sync skipped: ${e}`);
+    return { ok: false, removed: 0 };
+  }
+
+  const removed = dropMissingUnsubscribedMods(ids) + stripSessionUnsubscribedMods();
+  const idsChanged = !sameIdSet(ids, mm.subscribedWorkshopIds);
+  mm.subscribedWorkshopIds = ids;
+  if (removed > 0) {
+    appLog(`Workshop subscription sync: removed ${removed} mod(s) that are no longer installed`);
+  }
+  if (removed > 0 || idsChanged) notifyModsUpdated();
+  return { ok: true, removed };
+}
+
+function startSubscriptionSync(): void {
+  if (subscriptionSyncTimer) return;
+  subscriptionSyncTimer = setInterval(() => {
+    void syncWorkshopSubscriptions();
+  }, SUBSCRIPTION_SYNC_MS);
+}
+
+function stopSubscriptionSync(): void {
+  if (!subscriptionSyncTimer) return;
+  clearInterval(subscriptionSyncTimer);
+  subscriptionSyncTimer = null;
 }
 
 const scanWhileDownloadingOpts = {
@@ -916,6 +1047,51 @@ function registerIpc() {
     if (applied > 0) notifyModsUpdated();
     return { ok: true, applied, mods: mm.getMods() };
   });
+  ipcMain.handle("unsubscribe-workshop-mod", async (_e, workshopId: string) => {
+    await ensureInit();
+    const payload = () => ({
+      mods: mm.getMods(),
+      subscribedWorkshopIds: mm.subscribedWorkshopIds,
+    });
+    if (!/^\d{5,15}$/.test(workshopId)) {
+      return { ok: false, error: "INVALID", errorCode: "INVALID", ...payload() };
+    }
+    const appId = getCurrentSteamAppId();
+    if (!appId) {
+      return { ok: false, error: "Steam unavailable", errorCode: "STEAM_UNAVAILABLE", ...payload() };
+    }
+    try {
+      const results = await unsubscribeWorkshopItemsViaSteam(appId, [workshopId]);
+      const result = results.get(workshopId);
+      if (!result?.ok) {
+        return {
+          ok: false,
+          error: result?.error ?? "STEAM_UNSUBSCRIBE_FAILED",
+          errorCode: "STEAM_UNSUBSCRIBE_FAILED",
+          ...payload(),
+        };
+      }
+      rememberUnsubscribed([workshopId]);
+      unlockPendingDownload(workshopId);
+      mm.subscribedWorkshopIds = mm.subscribedWorkshopIds.filter(id => id !== workshopId);
+      const removed = stripSessionUnsubscribedMods();
+      appLog(`Unsubscribed from workshop item ${workshopId}; removed ${removed} list row(s)`);
+      notifyModsUpdated();
+      void syncWorkshopSubscriptions();
+      return { ok: true, ...payload() };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      appLog(`Unsubscribe failed for ${workshopId}: ${message}`);
+      return {
+        ok: false,
+        error: message,
+        errorCode: isSteamIpcUnavailableError(e) || isSteamIpcErrorMessage(message)
+          ? "STEAM_UNAVAILABLE"
+          : "STEAM_UNSUBSCRIBE_FAILED",
+        ...payload(),
+      };
+    }
+  });
   ipcMain.handle("trigger-workshop-download", async (_e, workshopId: string) => {
     await ensureInit();
     const appId = getCurrentSteamAppId();
@@ -1489,6 +1665,12 @@ app.whenReady().then(async () => {
   });
 
   mm = new ModManager({ configDir: dataDir, log: msg => appLog(`[core] ${msg}`) });
+  const scanMods = mm.scanMods.bind(mm);
+  mm.scanMods = async (options) => {
+    const mods = await scanMods(options);
+    stripSessionUnsubscribedMods();
+    return mm.mods.length === mods.length ? mods : mm.mods;
+  };
   registerIpc();
   createWindow();
 
@@ -1499,7 +1681,13 @@ app.whenReady().then(async () => {
     throw err;
   });
 
-  void initPromise.then(() => runDeferredWorkshopEnrichment());
+  void initPromise.then(() => {
+    startSubscriptionSync();
+    return runDeferredWorkshopEnrichment();
+  });
 });
 
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+app.on("window-all-closed", () => {
+  stopSubscriptionSync();
+  if (process.platform !== "darwin") app.quit();
+});

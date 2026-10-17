@@ -1,5 +1,5 @@
 import { useT } from "../i18n";
-import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2, Trash2 } from "lucide-react";
+import { X, ExternalLink, FolderOpen, Copy, Check, Package, Loader2, Trash2, BookmarkMinus } from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
@@ -24,9 +24,17 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
   const [copied, setCopied] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [unsubscribeConfirmOpen, setUnsubscribeConfirmOpen] = useState(false);
+  const [unsubscribeError, setUnsubscribeError] = useState<string | null>(null);
+  const [unsubscribeBusy, setUnsubscribeBusy] = useState(false);
   const isCheckingPrerequisites = useStore(s => !!s.prerequisiteChecking[mod.name]);
+  const subscribedWorkshopIds = useStore(s => s.subscribedWorkshopIds);
   const updateStatus = getModUpdateStatus(mod);
   const canDeleteLocal = isLocalMod(mod) && !!onDeleteLocal;
+  const workshopItemId = resolveModWorkshopId(mod);
+  const canUnsubscribe = !!workshopItemId
+    && !isLocalMod(mod)
+    && subscribedWorkshopIds.includes(workshopItemId);
 
   useEffect(() => {
     const workshopId = resolveModWorkshopId(mod);
@@ -62,6 +70,30 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
     }
   };
 
+  const handleUnsubscribe = async () => {
+    if (!workshopItemId || !window.api.unsubscribeWorkshopMod) return;
+    setUnsubscribeBusy(true);
+    setUnsubscribeError(null);
+    try {
+      const result = await window.api.unsubscribeWorkshopMod(workshopItemId);
+      if (Array.isArray(result.mods)) setMods(result.mods);
+      if (result.subscribedWorkshopIds) {
+        useStore.setState({ subscribedWorkshopIds: result.subscribedWorkshopIds });
+      }
+      if (!result.ok) {
+        const code = result.errorCode ?? result.error ?? "unknown";
+        setUnsubscribeError(t("moddetail.unsubscribeFailed", { error: result.error ?? code }));
+        return;
+      }
+      setUnsubscribeConfirmOpen(false);
+      onClose();
+    } catch (e) {
+      setUnsubscribeError(t("moddetail.unsubscribeFailed", { error: String(e) }));
+    } finally {
+      setUnsubscribeBusy(false);
+    }
+  };
+
   // 打开 mod 所在文件夹，并选中 pack 文件
   const handleOpenFolder = async () => {
     try {
@@ -80,12 +112,12 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
   return createPortal(
     <>
     <div className="modal-shell">
-      <div className="modal-backdrop" onClick={onClose} />
+      <div className="modal-backdrop" onClick={unsubscribeBusy ? undefined : onClose} />
       <div className="modal-panel w-[480px] max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="modal-header">
           <h2 className="text-base font-semibold text-morandi-text truncate pr-4 flex-1">{displayName}</h2>
-          <button onClick={onClose} className="modal-close-btn">
+          <button onClick={onClose} disabled={unsubscribeBusy} className="modal-close-btn">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -261,6 +293,19 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
               <FolderOpen className="w-3.5 h-3.5" />
               {t("moddetail.openFolder")}
             </button>
+            {canUnsubscribe && (
+              <button
+                onClick={() => setUnsubscribeConfirmOpen(true)}
+                disabled={unsubscribeBusy}
+                className="btn-morandi-ghost text-xs flex items-center gap-1.5 text-morandi-danger hover:text-morandi-danger"
+                title={t("moddetail.unsubscribeHint")}
+              >
+                {unsubscribeBusy
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <BookmarkMinus className="w-3.5 h-3.5" />}
+                {t("moddetail.unsubscribe")}
+              </button>
+            )}
             {canDeleteLocal && (
               <button
                 onClick={() => setDeleteConfirmOpen(true)}
@@ -272,11 +317,31 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
               </button>
             )}
           </div>
-          <button onClick={onClose} className="btn-morandi text-xs">
+          <button onClick={onClose} disabled={unsubscribeBusy} className="btn-morandi text-xs">
             {t("common.close")}
           </button>
         </div>
+        {unsubscribeError && (
+          <p className="px-5 pb-3 text-xs text-morandi-danger">{unsubscribeError}</p>
+        )}
       </div>
+
+      {canUnsubscribe && (
+        <ConfirmDialog
+          open={unsubscribeConfirmOpen}
+          busy={unsubscribeBusy}
+          title={t("moddetail.unsubscribeConfirmTitle")}
+          message={unsubscribeError ?? t("moddetail.unsubscribeConfirmMsg", { name: displayName })}
+          confirmText={unsubscribeBusy ? t("moddetail.unsubscribing") : t("moddetail.unsubscribe")}
+          variant="danger"
+          onConfirm={() => { void handleUnsubscribe(); }}
+          onCancel={() => {
+            if (unsubscribeBusy) return;
+            setUnsubscribeError(null);
+            setUnsubscribeConfirmOpen(false);
+          }}
+        />
+      )}
 
       {canDeleteLocal && (
         <ConfirmDialog

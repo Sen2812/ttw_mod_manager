@@ -48,6 +48,7 @@ const api = {
   checkModUpdates: (force) => ipcRenderer.invoke("check-mod-updates", force),
   forceUpdateMod: (modName) => ipcRenderer.invoke("force-update-mod", modName),
   triggerWorkshopDownload: (workshopId) => ipcRenderer.invoke("trigger-workshop-download", workshopId),
+  unsubscribeWorkshopMod: (workshopId) => ipcRenderer.invoke("unsubscribe-workshop-mod", workshopId),
   forceUpdateAllOutdated: () => ipcRenderer.invoke("force-update-all-outdated"),
   openUrl: (url) => ipcRenderer.invoke("open-url", url),
   openFolder: (targetPath) => ipcRenderer.invoke("open-folder", targetPath),

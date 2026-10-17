@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useT } from "../i18n";
-import { AlertTriangle, Trash2, Info, X } from "lucide-react";
+import { AlertTriangle, Trash2, Info, X, Loader2 } from "lucide-react";
 import clsx from "clsx";
 
 export type ConfirmVariant = "warning" | "danger" | "primary";
@@ -16,6 +16,8 @@ interface ConfirmDialogProps {
   onSecondary?: () => void;
   /** 视觉变体：warning（琥珀）/ danger（粉红）/ primary（灰褐） */
   variant?: ConfirmVariant;
+  /** Disables dismiss and confirm while an action is still running. */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -59,20 +61,21 @@ export default function ConfirmDialog({
   secondaryText,
   onSecondary,
   variant = "warning",
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   const t = useT();
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || busy) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Enter") { e.preventDefault(); onConfirm(); }
       else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, onConfirm, onCancel, onSecondary]);
+  }, [open, busy, onConfirm, onCancel, onSecondary]);
 
   if (!open) return null;
 
@@ -81,10 +84,11 @@ export default function ConfirmDialog({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="overlay-scrim" onClick={onCancel} />
+      <div className="overlay-scrim" onClick={busy ? undefined : onCancel} />
       <div className="relative z-10 card-morandi w-[380px] p-6 shadow-morandi-lg animate-[modalIn_200ms_ease-out]">
         <button
           onClick={onCancel}
+          disabled={busy}
           className="absolute top-3 right-3 modal-close-btn"
           aria-label={t("common.close")}
         >
@@ -100,7 +104,7 @@ export default function ConfirmDialog({
         <p className="text-sm text-morandi-text-secondary text-center mb-6 leading-relaxed">{message}</p>
 
         <div className="flex justify-center gap-2">
-          <button onClick={onCancel} className="btn-morandi-ghost min-w-[88px] justify-center">
+          <button onClick={onCancel} disabled={busy} className="btn-morandi-ghost min-w-[88px] justify-center">
             {cancelText ?? t("common.cancel")}
           </button>
           {onSecondary && (
@@ -109,7 +113,8 @@ export default function ConfirmDialog({
               {secondaryText}
             </button>
           )}
-          <button onClick={onConfirm} className={clsx(s.btn, "min-w-[88px]")}>
+          <button onClick={onConfirm} disabled={busy} className={clsx(s.btn, "min-w-[88px] inline-flex items-center justify-center gap-1.5")}>
+            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
             {confirmText ?? t("common.confirm")}
           </button>
         </div>

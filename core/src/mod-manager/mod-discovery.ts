@@ -75,7 +75,7 @@ function collectWorkshopItemIds(mods: Mod[], subscribedWorkshopIds: string[]): s
  * Uses ISteamRemoteStorage/GetPublishedFileDetails endpoint.
  * Caller should only pass IDs not already present in the local cache.
  */
-export async function fetchWorkshopMetadata(
+async function fetchWorkshopMetadataBatches(
   workshopIds: string[],
   log?: LogCallback,
 ): Promise<Map<string, WorkshopItemData>> {
@@ -168,6 +168,53 @@ export async function fetchWorkshopMetadata(
   }
 
   log?.(`Steam API: received metadata for ${result.size} item(s)`);
+  return result;
+}
+
+/** In-flight metadata requests, so startup enrichment and title prefetch share one POST. */
+const metadataInflight = new Map<string, Promise<WorkshopItemData | undefined>>();
+
+/**
+ * Fetch mod metadata from Steam Web API in batches.
+ * Uses ISteamRemoteStorage/GetPublishedFileDetails endpoint.
+ * Caller should only pass IDs not already present in the local cache.
+ * Concurrent callers for the same ID join the request already in flight.
+ */
+export async function fetchWorkshopMetadata(
+  workshopIds: string[],
+  log?: LogCallback,
+): Promise<Map<string, WorkshopItemData>> {
+  const result = new Map<string, WorkshopItemData>();
+  const unique = [...new Set(workshopIds.filter(id => /^\d{5,15}$/.test(id)))];
+  if (unique.length === 0) return result;
+
+  const toFetch: string[] = [];
+  const joined: Promise<void>[] = [];
+  for (const id of unique) {
+    const pending = metadataInflight.get(id);
+    if (pending) {
+      joined.push(pending.then((data) => {
+        if (data) result.set(id, data);
+      }));
+    } else {
+      toFetch.push(id);
+    }
+  }
+
+  if (toFetch.length > 0) {
+    const batchPromise = fetchWorkshopMetadataBatches(toFetch, log);
+    for (const id of toFetch) {
+      metadataInflight.set(id, batchPromise.then(map => map.get(id)));
+    }
+    try {
+      const fetched = await batchPromise;
+      for (const [id, data] of fetched) result.set(id, data);
+    } finally {
+      for (const id of toFetch) metadataInflight.delete(id);
+    }
+  }
+
+  await Promise.all(joined);
   return result;
 }
 
@@ -618,7 +665,7 @@ async function mergeMissingSubscribedWorkshopMods(
 
   for (const prev of preserveWorkshopMods ?? []) {
     const id = resolveModWorkshopId(prev);
-    if (id && !presentWorkshopIds.has(id)) missingIds.add(id);
+    if (id && !presentWorkshopIds.has(id) && subscribedSet.has(id)) missingIds.add(id);
   }
 
   if (contentFolder) {
@@ -631,18 +678,13 @@ async function mergeMissingSubscribedWorkshopMods(
     );
     for (const id of subscribedMissing) missingIds.add(id);
 
-    // Workshop folders on disk without a loadable .pack (empty folder, stub file, etc.)
+    // Empty workshop folders only stay visible while the item is still subscribed.
+    // A cache hit is not a subscription — otherwise unsubscribed items linger forever.
     for (const folderId of contentFolderIds) {
       if (!isNumericWorkshopId(folderId)) continue;
       if (presentWorkshopIds.has(folderId)) continue;
       if (workshopFolderHasValidPack(contentFolder, folderId)) continue;
-      if (
-        subscribedSet.has(folderId)
-        || hintByWorkshopId.has(folderId)
-        || cache?.has(folderId)
-      ) {
-        missingIds.add(folderId);
-      }
+      if (subscribedSet.has(folderId)) missingIds.add(folderId);
     }
   }
 

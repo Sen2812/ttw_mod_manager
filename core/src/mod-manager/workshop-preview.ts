@@ -114,6 +114,7 @@ export async function ensureWorkshopPreviewImage(
   if (existing) return existing;
 
   let previewUrl = previewUrlHint?.trim() || "";
+  if (!previewUrl && previewUrlHint !== undefined) return null;
   if (!previewUrl) {
     try {
       const meta = await fetchWorkshopMetadata([workshopId], log);
@@ -186,7 +187,10 @@ export async function fillMissingWorkshopPreviews(
 
   let filled = 0;
   await mapWithConcurrency(missing, options.concurrency ?? DEFAULT_CONCURRENCY, async (mod) => {
-    const hint = options.previewUrlById?.get(mod.workshopId);
+    const known = options.previewUrlById?.has(mod.workshopId) ?? false;
+    const hint = known
+      ? (options.previewUrlById?.get(mod.workshopId)?.trim() ?? "")
+      : undefined;
     const pathSaved = await ensureWorkshopPreviewImage(mod.workshopId, contentFolder, log, hint);
     if (pathSaved) {
       mod.imgPath = pathSaved;

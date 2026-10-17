@@ -208,6 +208,13 @@ declare global {
         mods: Mod[];
         subscribedWorkshopIds?: string[];
       }>;
+      unsubscribeWorkshopMod: (workshopId: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        errorCode?: string;
+        mods: Mod[];
+        subscribedWorkshopIds?: string[];
+      }>;
       forceUpdateAllOutdated: () => Promise<{ updated: number; failed: string[]; mods: Mod[]; outdatedCount: number }>;
       // External links / folders
       openUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;

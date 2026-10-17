@@ -278,6 +278,30 @@ if (command === "getDependencies") {
   }
   if (process.send) process.send({ results });
   setTimeout(() => process.exit(0), 200);
+} else if (command === "unsubscribeItems") {
+  const appId = Number(process.argv[2]);
+  const ids = parseItemIds(process.argv[4]);
+  let client;
+  try {
+    client = steamworks.init(appId);
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+    process.exit(1);
+  }
+
+  void (async () => {
+    const results = {};
+    for (const id of ids) {
+      try {
+        await client.workshop.unsubscribe(id);
+        results[id.toString()] = { ok: true };
+      } catch (e) {
+        results[id.toString()] = { ok: false, error: String(e) };
+      }
+    }
+    if (process.send) process.send({ results });
+    setTimeout(() => process.exit(0), 200);
+  })();
 } else if (command === "ping") {
   const appId = Number(process.argv[2]);
   try {

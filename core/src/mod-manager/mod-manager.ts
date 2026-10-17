@@ -12,6 +12,7 @@ import { gameRegistry, BUILTIN_GAMES } from "../game-definitions";
 import { ConfigManager, AppConfig, createDefaultConfig, ConfigIO } from "../config";
 import { scanMods, enrichWorkshopNetwork, ensureModPrerequisites as ensureModPrerequisitesForMod, resolveGameFolderPaths, LogCallback, checkWorkshopUpdates, type ScanModsOptions } from "./mod-discovery";
 import { fetchWorkshopTitlesForIds } from "./workshop-title-fetch";
+import { WorkshopCache } from "./workshop-cache";
 import { fillMissingWorkshopPreviews } from "./workshop-preview";
 import {
   countOutdatedMods,
@@ -243,7 +244,18 @@ export class ModManager {
     );
     const contentFolder = this.folderPaths?.contentFolder;
     if (contentFolder) {
-      await fillMissingWorkshopPreviews(this.mods, contentFolder, this.log);
+      const cache = new WorkshopCache(this.configDir).load(this.log);
+      const previewUrlById = new Map<string, string | undefined>();
+      for (const mod of this.mods) {
+        if (!/^\d{5,15}$/.test(mod.workshopId)) continue;
+        const entry = cache.get(mod.workshopId);
+        if (!entry || entry.metadataFetchedAt === undefined) continue;
+        previewUrlById.set(mod.workshopId, entry.previewUrl);
+      }
+      await fillMissingWorkshopPreviews(this.mods, contentFolder, this.log, {
+        previewUrlById,
+        concurrency: 2,
+      });
     }
     this.mods = sortByLoadOrder(this.mods);
     for (const mod of this.mods) normalizeModTagFields(mod);

@@ -4,6 +4,22 @@
 
 import type { Mod } from "../types";
 
+/**
+ * Steam community error / login pages, including localized titles such as
+ * "Steam 社区 :: 错误" returned when HTML scraping is rate-limited.
+ */
+export function isSteamPlaceholderTitle(title: string | undefined): boolean {
+  const t = title?.trim();
+  if (!t) return false;
+  if (/^steam\s*community\s*::\s*error$/i.test(t)) return true;
+  if (/^steam\s*社区\s*::\s*错误$/i.test(t)) return true;
+  if (/^steam\s*社區\s*::\s*錯誤$/i.test(t)) return true;
+  if (/^steam workshop$/i.test(t)) return true;
+  if (/^login$/i.test(t)) return true;
+  if (/^error$/i.test(t)) return true;
+  return false;
+}
+
 /** Reject Steam error/login placeholder pages and bare numeric IDs. */
 export function isUsableWorkshopTitle(
   title: string | undefined,
@@ -12,9 +28,7 @@ export function isUsableWorkshopTitle(
   const t = title?.trim();
   if (!t) return false;
   if (t === workshopId) return false;
-  if (/^steam community :: error$/i.test(t)) return false;
-  if (/^steam workshop$/i.test(t)) return false;
-  if (/^login$/i.test(t)) return false;
+  if (isSteamPlaceholderTitle(t)) return false;
   // Cached/API rows sometimes store the numeric ID as the title.
   if (/^\d{5,15}$/.test(t) && /^\d{5,15}$/.test(workshopId)) return false;
   return true;

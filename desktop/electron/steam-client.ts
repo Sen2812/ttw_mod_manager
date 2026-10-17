@@ -248,6 +248,35 @@ export async function triggerWorkshopDownloadsViaSteam(
   }
 }
 
+export interface WorkshopUnsubscribeResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** Unsubscribe from workshop items via ISteamUGC#UnsubscribeItem. */
+export async function unsubscribeWorkshopItemsViaSteam(
+  appId: number,
+  workshopIds: string[],
+): Promise<Map<string, WorkshopUnsubscribeResult>> {
+  if (workshopIds.length === 0) return new Map();
+  try {
+    const msg = await runSteamSub<{ results?: Record<string, WorkshopUnsubscribeResult> }>(
+      appId,
+      "unsubscribeItems",
+      workshopIds.join(","),
+    );
+    const map = new Map<string, WorkshopUnsubscribeResult>();
+    for (const [id, result] of Object.entries(msg.results ?? {})) {
+      if (result) map.set(id, result);
+    }
+    return map;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (isSteamIpcErrorMessage(message)) throw new SteamIpcUnavailableError(message);
+    throw e;
+  }
+}
+
 /** Query Steam download/install state for workshop items. */
 export async function getWorkshopItemStatusesViaSteam(
   appId: number,

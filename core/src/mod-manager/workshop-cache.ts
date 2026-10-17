@@ -8,6 +8,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { isUsableWorkshopTitle } from "./mod-display";
 
 /** Bump when required-mod fetch backend changes; invalidates cached requiredIds. */
 export const REQUIRED_IDS_CACHE_GENERATION = 3;
@@ -77,9 +78,15 @@ export class WorkshopCache {
     }
     this.migrateLegacyTimestamps();
     this.normalizeLegacyEntries();
+    const droppedTitles = this.dropUnusableTitles();
+    if (droppedTitles > 0) {
+      log?.(`Workshop cache: dropped ${droppedTitles} unusable title(s) so they can be fetched again`);
+    }
     const invalidated = this.invalidateLegacyRequiredIds();
     if (invalidated > 0) {
       log?.(`Workshop cache: cleared legacy requiredIds from ${invalidated} item(s)`);
+    }
+    if (droppedTitles > 0 || invalidated > 0) {
       this.save();
     }
     return this;
@@ -170,6 +177,21 @@ export class WorkshopCache {
   }
 
   /**
+   * Forget titles that are Steam error pages or numeric IDs.
+   * Clears metadataFetchedAt so the next routine scan is allowed to ask again.
+   */
+  dropUnusableTitles(): number {
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (!entry.title || isUsableWorkshopTitle(entry.title, entry.publishedfileid)) continue;
+      delete entry.title;
+      delete entry.metadataFetchedAt;
+      count++;
+    }
+    return count;
+  }
+
+  /**
    * Which IDs need a Steam Web API metadata fetch.
    *
    * routine  — only IDs never cached, or cached without a title past TTL.
@@ -182,7 +204,7 @@ export class WorkshopCache {
       const entry = this.entries.get(id);
       if (!entry) return true;
       if (entry.metadataUnavailable) return false;
-      if (entry.title) {
+      if (entry.title && isUsableWorkshopTitle(entry.title, id)) {
         if (mode === "refresh" && entry.metadataFetchedAt !== undefined) {
           return now - entry.metadataFetchedAt > METADATA_TTL_MS;
         }
@@ -237,7 +259,7 @@ export class WorkshopCache {
     const now = Date.now();
     for (const [id, patch] of items) {
       const existing = this.entries.get(id) ?? { publishedfileid: id };
-      if (patch.title) existing.title = patch.title;
+      if (patch.title && isUsableWorkshopTitle(patch.title, id)) existing.title = patch.title;
       if (patch.creator) existing.creator = patch.creator;
       if (patch.tags) existing.tags = patch.tags;
       if (patch.timeUpdated !== undefined) {

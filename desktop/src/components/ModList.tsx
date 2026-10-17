@@ -925,9 +925,9 @@ export default function ModList() {
         </div>
       )}
 
-      {selectedMod && (
+      {selectedMod && mods.some(m => m.name === selectedMod.name) && (
         <ModDetailModal
-          mod={selectedMod}
+          mod={mods.find(m => m.name === selectedMod.name) ?? selectedMod}
           onClose={() => setSelectedMod(null)}
           onShowUpdate={handleShowUpdate}
           onDeleteLocal={handleDeleteLocal}
