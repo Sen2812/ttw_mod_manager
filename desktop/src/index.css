@@ -103,7 +103,7 @@
   .card-morandi { @apply bg-morandi-card rounded-xl border border-morandi-border-light shadow-morandi; }
   .surface-muted { @apply bg-morandi-sidebar rounded-lg border border-morandi-border-light; }
   .surface-muted-flat { @apply bg-morandi-sidebar rounded-lg; }
-  .panel-header { @apply px-4 py-3 border-b border-morandi-border-light bg-morandi-sidebar/45 shrink-0; }
+  .panel-header { @apply relative z-10 px-4 py-3 border-b border-morandi-border-light bg-morandi-sidebar/45 shrink-0; }
   .panel-toolbar { @apply px-4 py-3 border-b border-morandi-border-light bg-morandi-card flex items-center gap-3 shrink-0; }
   .panel-footer { @apply px-4 py-3 border-t border-morandi-border-light shrink-0; }
 
@@ -179,6 +179,11 @@
   .thumb-morandi-sm {
     @apply w-9 h-9 rounded-md bg-morandi-sidebar border border-morandi-border-light
     flex items-center justify-center shrink-0 overflow-hidden;
+  }
+  .filter-chip {
+    @apply inline-flex items-center gap-1 max-w-full px-1.5 py-0.5 rounded-md text-[11px]
+    bg-morandi-accent/10 text-morandi-accent border border-morandi-accent/25
+    hover:bg-morandi-accent/20;
   }
   .chip-success {
     @apply text-[10px] font-medium leading-none px-1.5 py-0.5 rounded-md

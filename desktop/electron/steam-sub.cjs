@@ -302,6 +302,61 @@ if (command === "getDependencies") {
     if (process.send) process.send({ results });
     setTimeout(() => process.exit(0), 200);
   })();
+} else if (command === "getSubscriptionTimes") {
+  const appId = Number(process.argv[2]);
+  let client;
+  try {
+    client = steamworks.init(appId);
+  } catch (e) {
+    if (process.send) process.send({ __error: String(e) });
+    process.exit(1);
+  }
+
+  void (async () => {
+    const times = {};
+    try {
+      const accountId = client.localplayer.getSteamId().accountId;
+      let page = 1;
+      let seen = 0;
+      let triedZero = false;
+      while (page <= 40) {
+        const result = await client.workshop.getUserItems(
+          page,
+          accountId,
+          5, // Subscribed
+          13, // All
+          4, // SubscriptionDateDesc
+          { consumer: appId },
+          { includeMetadata: false, onlyIds: false },
+        );
+        const items = result.items || [];
+        for (const item of items) {
+          if (!item || item.publishedFileId == null) continue;
+          const sec = Number(item.timeAddedToUserList || 0);
+          if (sec > 0) {
+            times[item.publishedFileId.toString()] = Math.floor(sec * 1000 / 60000) * 60000;
+          }
+        }
+        const total = Number(result.totalResults || 0);
+        if (items.length === 0) {
+          if (page === 1 && total > 0 && !triedZero) {
+            triedZero = true;
+            page = 0;
+            continue;
+          }
+          break;
+        }
+        seen += items.length;
+        if (total > 0 && seen >= total) break;
+        page += 1;
+      }
+    } catch (e) {
+      if (process.send) process.send({ __error: String(e), times });
+      process.exit(1);
+    }
+    if (process.send) process.send({ times });
+    setTimeout(() => process.exit(0), 200);
+  })();
 } else if (command === "ping") {
   const appId = Number(process.argv[2]);
   try {

@@ -212,8 +212,8 @@ export default function Sidebar() {
               !isDirty && "opacity-50 cursor-not-allowed pointer-events-none",
               isDirty && "text-morandi-accent",
             )}
-            title={t("sidebar.saveChanges")}
-            aria-label={t("sidebar.saveChanges")}
+            title={t("sidebar.saveChangesHint")}
+            aria-label={t("sidebar.saveChangesHint")}
           >
             {isSaving ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -234,7 +234,7 @@ export default function Sidebar() {
             type="button"
             onClick={() => setShowNewPresetModal(true)}
             className="icon-btn-sm"
-            title={t("newPreset.title")}
+            title={t("newPreset.hint")}
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
@@ -341,7 +341,7 @@ export default function Sidebar() {
             onClick={handleExportOrder}
             disabled={!activePresetName || isExportingOrder}
             className="btn-morandi-subtle flex-1"
-            title={t("sidebar.exportOrder")}
+            title={t("sidebar.exportOrderHint")}
           >
             {isExportingOrder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             <span>{t("sidebar.exportOrder")}</span>
@@ -350,7 +350,7 @@ export default function Sidebar() {
             onClick={handleImportOrder}
             disabled={isImportingOrder}
             className="btn-morandi-subtle flex-1"
-            title={t("sidebar.importOrder")}
+            title={t("sidebar.importOrderHint")}
           >
             {isImportingOrder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             <span>{t("sidebar.importOrder")}</span>

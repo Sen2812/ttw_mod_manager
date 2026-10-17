@@ -3,7 +3,7 @@ import { exec, execSync, spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 
-import { ModManager, sortByLoadOrder } from "../../core/src";
+import { ModManager, sortByLoadOrder, WorkshopCache } from "../../core/src";
 import { gameRegistry, BUILTIN_GAMES } from "../../core/src";
 import { SupportedGame, Mod, Preset } from "../../core/src";
 import { findSteamPath as coreFindSteamPath } from "../../core/src/mod-manager/mod-discovery";
@@ -27,6 +27,7 @@ import {
   fetchSubscribedWorkshopIdsViaSteam,
   triggerWorkshopDownloadsViaSteam,
   unsubscribeWorkshopItemsViaSteam,
+  fetchWorkshopSubscriptionTimesViaSteam,
   getWorkshopItemStatusesViaSteam,
   isWorkshopDownloadInProgress,
   isSteamIpcErrorMessage,
@@ -254,6 +255,7 @@ const sessionUnsubscribedIds = new Set<string>();
 /** When we asked Steam to unsubscribe; a stale subscribed-list during this window is ignored. */
 const recentlyUnsubscribedAt = new Map<string, number>();
 const SUBSCRIPTION_SYNC_MS = 20_000;
+let subscriptionTimesFetchedAt = 0;
 const UNSUBSCRIBE_GRACE_MS = 3 * 60_000;
 let subscriptionSyncChain: Promise<void> = Promise.resolve();
 /** Workshop IDs with an active download request — never re-trigger until pack appears or force-update. */
@@ -988,6 +990,37 @@ function registerIpc() {
     await ensureInit();
     mm.disableAll();
     return mm.getMods();
+  });
+  ipcMain.handle("refresh-subscription-times", async () => {
+    await ensureInit();
+    const now = Date.now();
+    const missing = mm.getMods().some((mod) => (
+      !mod.isInData && !!resolveModWorkshopId(mod) && !mod.subbedTime
+    ));
+    const ttl = missing ? 2 * 60_000 : 10 * 60_000;
+    if (now - subscriptionTimesFetchedAt < ttl) {
+      return { ok: true, skipped: true, mods: mm.getMods() };
+    }
+    const appId = getCurrentSteamAppId();
+    if (!appId) return { ok: false, error: "STEAM_UNAVAILABLE", mods: mm.getMods() };
+    try {
+      const times = await fetchWorkshopSubscriptionTimesViaSteam(appId);
+      const cache = new WorkshopCache(dataDir).load();
+      cache.setSubscribedAt(Object.entries(times));
+      cache.save();
+      for (const mod of mm.getMods()) {
+        if (mod.isInData) continue;
+        const id = resolveModWorkshopId(mod);
+        const subscribedAt = id ? times[id] : undefined;
+        if (subscribedAt) mod.subbedTime = subscribedAt;
+      }
+      subscriptionTimesFetchedAt = Date.now();
+      notifyModsUpdated();
+      return { ok: true, mods: mm.getMods() };
+    } catch (e) {
+      appLog(`[steam] subscription times failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ok: false, error: "STEAM_UNAVAILABLE", mods: mm.getMods() };
+    }
   });
   ipcMain.handle("auto-sort-mods", async () => {
     await ensureInit();

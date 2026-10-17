@@ -21,6 +21,7 @@ const api = {
   disableAll: () => ipcRenderer.invoke("disable-all"),
   applyDragOrder: (ns) => ipcRenderer.invoke("apply-drag-order", ns),
   autoSortMods: () => ipcRenderer.invoke("auto-sort-mods"),
+  refreshSubscriptionTimes: () => ipcRenderer.invoke("refresh-subscription-times"),
   getConfig: () => ipcRenderer.invoke("get-config"),
   getSteamStatus: () => ipcRenderer.invoke("get-steam-status"),
   saveUiState: (s) => ipcRenderer.invoke("save-ui-state", s),

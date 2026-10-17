@@ -41,6 +41,7 @@ import {
 } from "./preset-order";
 import { isUsableWorkshopTitle } from "./mod-display";
 import { importLocalPackFiles, deleteLocalModFiles, isLocalMod, type ImportLocalPacksResult, type DeleteLocalModResult } from "./local-pack-import";
+import { applyLocalImportTimes, recordLocalImportTimes } from "./local-import-times";
 import { planEnabledAutoSort, type AutoSortSummary } from "./auto-sort";
 
 // ─── Mod Manager Class ───────────────────────────────────────────────────────
@@ -223,6 +224,7 @@ export class ModManager {
 
     // Load saved presets and restore state
     this.loadPresetsAndRestoreState();
+    applyLocalImportTimes(this.mods, this.configDir);
 
     // Sort by load order
     this.mods = sortByLoadOrder(this.mods);
@@ -714,13 +716,15 @@ export class ModManager {
     }
     const moddingFolder = path.join(this.folderPaths.gamePath, "data", "modding");
     const dataFolder = this.folderPaths.dataFolder ?? path.join(this.folderPaths.gamePath, "data");
-    return importLocalPackFiles({
+    const result = importLocalPackFiles({
       sourcePaths,
       moddingFolder,
       dataFolder,
       vanillaPacks: this.vanillaPacks,
       log: this.log,
     });
+    recordLocalImportTimes(result.imported, this.configDir);
+    return result;
   }
 
   /** Delete a local mod from disk and remove it from the current profile. */

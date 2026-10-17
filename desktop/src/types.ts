@@ -7,6 +7,7 @@ export interface Mod {
   isMovie: boolean;
   size?: number;
   subbedTime?: number;
+  importedAt?: number;
   lastChangedLocal?: number;
   lastChanged?: number;
   isInModding?: boolean;
@@ -122,6 +123,12 @@ declare global {
       disableAll: () => Promise<Mod[] | ApiResponse>;
       reorderMod: (n: string, i: number) => Promise<Mod[] | ApiResponse>;
       applyDragOrder: (ns: string[]) => Promise<Mod[] | ApiResponse>;
+      refreshSubscriptionTimes: () => Promise<{
+        ok: boolean;
+        skipped?: boolean;
+        error?: string;
+        mods: Mod[];
+      }>;
       autoSortMods: () => Promise<{
         ok: boolean;
         mods: Mod[];

@@ -124,14 +124,14 @@ export default function TopBar() {
         <button
           onClick={() => setShowFeaturesPage(true)}
           className="titlebar-no-drag icon-btn"
-          title={t("topbar.features")}
+          title={t("topbar.featuresHint")}
         >
           <Sparkles className="w-4 h-4 text-morandi-text-secondary" />
         </button>
         <button
           onClick={() => setShowSettingsPage(true)}
           className="titlebar-no-drag icon-btn"
-          title={t("topbar.settings")}
+          title={t("topbar.settingsHint")}
         >
           <Settings className="w-4 h-4 text-morandi-text-secondary" />
         </button>

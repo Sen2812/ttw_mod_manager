@@ -10,6 +10,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import { getModWorkshopTags } from "@core/mod-manager/category-utils";
 import { getModDisplayName, getModSourceType, isLocalMod, isUsableWorkshopTitle, resolveModWorkshopId } from "@core/mod-manager/mod-display";
 import { getModUpdateStatus } from "@core/mod-manager/workshop-update-status";
+import { formatAddedTime } from "../utils/format-added-time";
 
 interface ModDetailModalProps {
   mod: Mod;
@@ -205,11 +206,15 @@ export default function ModDetailModal({ mod, onClose, onShowUpdate, onDeleteLoc
                   <p className="text-sm text-morandi-text">{new Date(mod.lastChanged).toLocaleDateString()}</p>
                 </InfoField>
               )}
-              {mod.subbedTime && (
-                <InfoField label={t("moddetail.subscribed")}>
-                  <p className="text-sm text-morandi-text">{new Date(mod.subbedTime).toLocaleDateString()}</p>
+              {mod.isInData && mod.importedAt ? (
+                <InfoField label={t("moddetail.imported")}>
+                  <p className="text-sm text-morandi-text">{formatAddedTime(mod.importedAt)}</p>
                 </InfoField>
-              )}
+              ) : mod.subbedTime ? (
+                <InfoField label={t("moddetail.subscribed")}>
+                  <p className="text-sm text-morandi-text">{formatAddedTime(mod.subbedTime)}</p>
+                </InfoField>
+              ) : null}
             </div>
 
             <InfoField label={t("category.workshopTags")}>

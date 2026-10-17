@@ -38,8 +38,10 @@ export interface Mod {
   isMovie: boolean;
   /** File size in bytes */
   size?: number;
-  /** Workshop subscription timestamp */
+  /** Workshop subscription time (ms). Set from Steam, not the folder clock. */
   subbedTime?: number;
+  /** When a local pack was imported (ms), precise to the minute. */
+  importedAt?: number;
   /** Required mod IDs: [workshopId, humanName][] */
   reqModIdToName?: [string, string][];
   /** Required mod IDs (raw) */

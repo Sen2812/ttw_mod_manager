@@ -17,15 +17,16 @@ import clsx from "clsx";
 import type { Mod, ModConflictStats } from "../types";
 import ModDetailModal from "./ModDetailModal";
 import ConfirmDialog from "./ConfirmDialog";
-import ModListFiltersBar from "./ModListFiltersBar";
+import ModListFiltersBar, { type CatalogSortDirection, type CatalogSortMode } from "./ModListFiltersBar";
 import ModRowTags from "./ModRowTags";
 import { useModListVirtualizer, VirtualModRows } from "./VirtualModRows";
 import { useWorkshopTitlePrefetch } from "../hooks/useWorkshopTitlePrefetch";
 import { getModDependencyIssues } from "@core/mod-manager/dependency-checker";
 import { getModWorkshopTags } from "@core/mod-manager/category-utils";
-import { getModDisplayName, getModSourceType } from "@core/mod-manager/mod-display";
+import { getModDisplayName, getModSourceType, isLocalMod } from "@core/mod-manager/mod-display";
+import { formatAddedTime, modAddedTime } from "../utils/format-added-time";
 import { isModOutdated } from "@core/mod-manager/workshop-update-status";
-import { sortByName, getEnabledModsInLoadOrder } from "@core/mod-manager/mod-sorting";
+import { sortByAddedTime, sortByName, getEnabledModsInLoadOrder } from "@core/mod-manager/mod-sorting";
 import {
   getEnabledModNames,
   insertEnabledModInOrder,
@@ -157,9 +158,10 @@ function ModRowActions({
 interface ModRowMetaProps {
   mod: Mod;
   emphasized?: boolean;
+  addedTimeLabel?: string;
 }
 
-function ModRowMeta({ mod, emphasized }: ModRowMetaProps) {
+function ModRowMeta({ mod, emphasized, addedTimeLabel }: ModRowMetaProps) {
   const displayName = getModDisplayName(mod);
   const workshopTags = getModWorkshopTags(mod);
 
@@ -192,9 +194,19 @@ function ModRowMeta({ mod, emphasized }: ModRowMetaProps) {
           source={getModSourceType(mod)}
           workshopTags={workshopTags}
         />
+        {addedTimeLabel && (
+          <div className="text-[11px] text-morandi-text-muted mt-0.5">{addedTimeLabel}</div>
+        )}
       </div>
     </>
   );
+}
+
+function formatCatalogAddedTime(mod: Mod, t: (key: string) => string): string | undefined {
+  const time = modAddedTime(mod);
+  if (!time) return undefined;
+  const label = isLocalMod(mod) ? t("moddetail.imported") : t("moddetail.subscribed");
+  return `${label} ${formatAddedTime(time)}`;
 }
 
 interface CatalogModRowProps {
@@ -208,11 +220,12 @@ interface CatalogModRowProps {
   onRequestDownload: (mod: Mod) => void;
   dependencyIssueCount: number;
   hasUpdate: boolean;
+  showAddedTime?: boolean;
 }
 
 const CatalogModRow = memo(function CatalogModRow({
   mod, allMods, onAddToProfile, onShowDetail, onShowCompat, onShowDependency, onShowUpdate, onRequestDownload,
-  dependencyIssueCount, hasUpdate,
+  dependencyIssueCount, hasUpdate, showAddedTime,
 }: CatalogModRowProps) {
   const t = useT();
   const awaitingDownloadOnly = isAwaitingDownloadOnly(mod);
@@ -228,7 +241,10 @@ const CatalogModRow = memo(function CatalogModRow({
       )}
       onDoubleClick={() => onShowDetail(mod)}
     >
-      <ModRowMeta mod={mod} />
+      <ModRowMeta
+        mod={mod}
+        addedTimeLabel={showAddedTime ? formatCatalogAddedTime(mod, t) : undefined}
+      />
       <div className="shrink-0 self-start mt-1">
         <ModRowActions
           mod={mod}
@@ -463,6 +479,22 @@ export default function ModList() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [autoSortOpen, setAutoSortOpen] = useState(false);
   const [autoSortBusy, setAutoSortBusy] = useState(false);
+  const [catalogSort, setCatalogSort] = useState<CatalogSortMode>("name");
+  const [catalogSortDir, setCatalogSortDir] = useState<CatalogSortDirection>("asc");
+  const [subscriptionTimesBusy, setSubscriptionTimesBusy] = useState(false);
+
+  const handleCatalogSort = useCallback(async (mode: CatalogSortMode) => {
+    setCatalogSort(mode);
+    setCatalogSortDir(mode === "added" ? "desc" : "asc");
+    if (mode !== "added") return;
+    setSubscriptionTimesBusy(true);
+    try {
+      const result = await window.api.refreshSubscriptionTimes();
+      if (result.mods) setMods(result.mods);
+    } finally {
+      setSubscriptionTimesBusy(false);
+    }
+  }, [setMods]);
 
   useEffect(() => {
     if (!importMessage) return;
@@ -478,9 +510,12 @@ export default function ModList() {
   );
 
   const catalogMods = useMemo(() => {
-    const sorted = sortByName(mods.filter(m => !m.isEnabled));
-    return filterMods(sorted, modFilters, filterOptions);
-  }, [mods, modFilters, filterOptions]);
+    const disabled = mods.filter(m => !m.isEnabled);
+    const sorted = catalogSort === "added" ? sortByAddedTime(disabled) : sortByName(disabled);
+    const nativeDesc = catalogSort === "added";
+    const ordered = (catalogSortDir === "desc") === nativeDesc ? sorted : [...sorted].reverse();
+    return filterMods(ordered, modFilters, filterOptions);
+  }, [mods, modFilters, filterOptions, catalogSort, catalogSortDir]);
 
   const profileMods = useMemo(() => getEnabledModsInLoadOrder(mods), [mods]);
 
@@ -879,6 +914,11 @@ export default function ModList() {
                 filters={modFilters}
                 onChange={setModFilters}
                 availableTags={availableTags}
+                sortMode={catalogSort}
+                onSortModeChange={handleCatalogSort}
+                sortDirection={catalogSortDir}
+                onSortDirectionChange={setCatalogSortDir}
+                sortBusy={subscriptionTimesBusy}
               />
             )}
             empty={isScanning ? (
@@ -908,6 +948,7 @@ export default function ModList() {
                     {...sharedRowProps}
                     dependencyIssueCount={0}
                     hasUpdate={!!outdatedByName[mod.name]}
+                    showAddedTime={catalogSort === "added"}
                   />
                 )}
               />

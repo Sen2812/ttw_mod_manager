@@ -968,7 +968,6 @@ export async function buildContentMod(
 
   let lastChangedLocal: number | undefined;
   let size: number | undefined;
-  let subbedTime: number | undefined;
   let isSymbolicLink = false;
 
   try {
@@ -976,13 +975,6 @@ export async function buildContentMod(
     lastChangedLocal = stats.mtimeMs;
     size = stats.size;
     isSymbolicLink = stats.isSymbolicLink();
-  } catch {
-    // stat failed
-  }
-
-  try {
-    const stats = fs.statSync(subfolderPath);
-    subbedTime = stats.birthtimeMs;
   } catch {
     // stat failed
   }
@@ -1016,7 +1008,6 @@ export async function buildContentMod(
     isDeleted: false,
     isMovie,
     size,
-    subbedTime: subbedTime ?? lastChangedLocal,
     dependencyPacks,
     author: metadata.author || "",
     tags: metadata.tags || ["mod"],
@@ -1046,13 +1037,15 @@ export interface ScanModsOptions {
 function applyWorkshopMetadataFromCache(mods: Mod[], cache: WorkshopCache): void {
   const workshopData = cache.asMap();
   for (const mod of mods) {
-    if (mod.workshopId && workshopData.has(mod.workshopId)) {
-      const data = workshopData.get(mod.workshopId)!;
-      if (!isUsableWorkshopTitle(mod.humanName, mod.workshopId)) {
+    const workshopId = resolveModWorkshopId(mod);
+    if (workshopId && workshopData.has(workshopId)) {
+      const data = workshopData.get(workshopId)!;
+      if (!isUsableWorkshopTitle(mod.humanName, workshopId)) {
         applyWorkshopTitle(mod, data.title);
       }
       if (!mod.author && data.creator) mod.author = data.creator;
       if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+      if (!mod.isInData && data.subscribedAt) mod.subbedTime = data.subscribedAt;
     }
   }
   applyWorkshopTimeUpdatedToMods(mods, workshopData);
@@ -1113,6 +1106,7 @@ export async function enrichWorkshopNetwork(
         }
         if (!mod.author && data.creator) mod.author = data.creator;
         if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+        if (!mod.isInData && data.subscribedAt) mod.subbedTime = data.subscribedAt;
       }
     }
 
@@ -1316,6 +1310,7 @@ export async function scanMods(
             }
             if (!mod.author && data.creator) mod.author = data.creator;
             if (data.tags?.length) mod.tags = normalizeWorkshopTags(data.tags);
+            if (!mod.isInData && data.subscribedAt) mod.subbedTime = data.subscribedAt;
           }
         }
 

@@ -6,6 +6,7 @@
  */
 
 import { Mod } from "../types";
+import { isLocalMod } from "./mod-display.js";
 
 const collator = new Intl.Collator("en");
 
@@ -43,6 +44,16 @@ export function toCaLauncherOrder(uiIndex: number, modCount: number): number {
  *   top of list  = lowest priority (gets overwritten in-game)
  *   bottom of list = highest priority (overwrites above)
  */
+/** Newest subscription or local import first. Mods without a time stay at the end. */
+export function sortByAddedTime(mods: Mod[]): Mod[] {
+  return [...mods].sort((a, b) => {
+    const ta = (isLocalMod(a) ? a.importedAt : a.subbedTime) ?? 0;
+    const tb = (isLocalMod(b) ? b.importedAt : b.subbedTime) ?? 0;
+    if (tb !== ta) return tb - ta;
+    return compareModNames(a.name, b.name);
+  });
+}
+
 export function sortByLoadOrder(mods: Mod[]): Mod[] {
   const sorted = sortByName(mods);
   const ordered = sorted

@@ -253,6 +253,17 @@ export interface WorkshopUnsubscribeResult {
   error?: string;
 }
 
+/** Subscribed workshop id → timeAddedToUserList in ms, floored to the minute. */
+export async function fetchWorkshopSubscriptionTimesViaSteam(
+  appId: number,
+): Promise<Record<string, number>> {
+  const msg = await runSteamSub<{ times?: Record<string, number> }>(
+    appId,
+    "getSubscriptionTimes",
+  );
+  return msg.times ?? {};
+}
+
 /** Unsubscribe from workshop items via ISteamUGC#UnsubscribeItem. */
 export async function unsubscribeWorkshopItemsViaSteam(
   appId: number,

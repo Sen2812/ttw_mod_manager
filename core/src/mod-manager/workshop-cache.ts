@@ -45,6 +45,8 @@ export interface WorkshopItemData {
   requiredIdsFetchFailed?: boolean;
   /** When timeUpdated was last fetched from the Steam Web API. */
   timeUpdatedFetchedAt?: number;
+  /** When the current user subscribed (ms), from Steam timeAddedToUserList. */
+  subscribedAt?: number;
   /** Steam consumer app ID from metadata API (e.g. 1142710 for WH3). */
   consumerAppId?: number;
 }
@@ -279,6 +281,15 @@ export class WorkshopCache {
       const existing = this.entries.get(id) ?? { publishedfileid: id };
       if (patch.timeUpdated !== undefined) existing.timeUpdated = patch.timeUpdated;
       existing.timeUpdatedFetchedAt = now;
+      this.entries.set(id, existing);
+    }
+  }
+
+  setSubscribedAt(items: Iterable<[string, number]>): void {
+    for (const [id, subscribedAt] of items) {
+      if (!subscribedAt) continue;
+      const existing = this.entries.get(id) ?? { publishedfileid: id };
+      existing.subscribedAt = subscribedAt;
       this.entries.set(id, existing);
     }
   }
