@@ -105,8 +105,8 @@ export default function TopBar() {
         </button>
         {showGameMenu && (
           <>
-            <div className="fixed inset-0 z-40" onClick={() => setShowGameMenu(false)} />
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 menu-popover min-w-[180px]">
+            <div className="titlebar-no-drag fixed inset-0 z-40" onClick={() => setShowGameMenu(false)} />
+            <div className="titlebar-no-drag absolute top-full left-1/2 -translate-x-1/2 mt-1 z-50 menu-popover min-w-[180px]">
               {games.map(game => (
                 <button key={game.id} onClick={() => handleGameChange(game.id)}
                   className={clsx("menu-item",

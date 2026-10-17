@@ -5,8 +5,13 @@
 @layer base {
   * { -webkit-app-region: no-drag; }
   body { font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif; user-select: none; }
-  .titlebar-drag { -webkit-app-region: drag; }
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  /* Descendants must be drag too. A global no-drag rule otherwise punches holes
+     in the title bar, so a double-click only restores the window on empty gaps. */
+  .titlebar-drag,
+  .titlebar-drag * { -webkit-app-region: drag; }
+  .titlebar-drag .titlebar-no-drag,
+  .titlebar-drag .titlebar-no-drag * { -webkit-app-region: no-drag; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #C4B8AA; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #A89F91; }

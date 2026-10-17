@@ -15,7 +15,7 @@ export function LanguageToggle({ compact = false }: { compact?: boolean }) {
     return (
       <button
         onClick={toggle}
-        className="btn-morandi-subtle !flex-none px-2"
+        className="titlebar-no-drag btn-morandi-subtle !flex-none px-2"
         title={locale === "zh" ? t("topbar.switchToEnglish") : t("topbar.switchToChinese")}
       >
         <Languages className="w-3.5 h-3.5" />
