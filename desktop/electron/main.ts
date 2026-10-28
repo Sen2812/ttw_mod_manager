@@ -3,7 +3,24 @@ import { exec, execSync, spawn } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 
-import { ModManager, sortByLoadOrder, WorkshopCache } from "../../core/src";
+import {
+  ModManager,
+  sortByLoadOrder,
+  WorkshopCache,
+  captureEvidence,
+  createLaunchRecord,
+  crashDiagnosticsRoot,
+  diagnoseLaunch,
+  freezeLaunch,
+  gameUserDirectory,
+  getLaunchRecord,
+  loadCrashDiagnosticsState,
+  saveCrashDiagnosticsState,
+  setLaunchRecord,
+  writeCrashReport,
+  type CrashDiagnosis,
+  type LaunchRecord,
+} from "../../core/src";
 import { gameRegistry, BUILTIN_GAMES } from "../../core/src";
 import { SupportedGame, Mod, Preset } from "../../core/src";
 import { findSteamPath as coreFindSteamPath } from "../../core/src/mod-manager/mod-discovery";
@@ -116,8 +133,114 @@ function buildBootstrapPayload() {
     preferences: {
       isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
       isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
+      isCrashDiagnosticsEnabled: mm.config.preferences.isCrashDiagnosticsEnabled ?? false,
     },
   };
+}
+
+let crashWatchTimer: ReturnType<typeof setInterval> | null = null;
+const CRASH_WATCH_MS = 5_000;
+
+function prefsCrashDiagnosticsEnabled(): boolean {
+  return !!mm?.config?.preferences?.isCrashDiagnosticsEnabled;
+}
+
+function stopCrashWatch(): void {
+  if (crashWatchTimer) {
+    clearInterval(crashWatchTimer);
+    crashWatchTimer = null;
+  }
+}
+
+function sealCrashLaunch(record: LaunchRecord): { diagnosis: CrashDiagnosis; reportPath: string | null } {
+  const diagnosis = freezeLaunch(record) ?? diagnoseLaunch(record, false);
+  const reportPath = writeCrashReport(dataDir, record, diagnosis);
+  if (reportPath) {
+    appLog(`[crash-diagnostics] wrote report ${reportPath}`);
+  }
+  return { diagnosis, reportPath };
+}
+
+function persistCrashState(mutator: (state: ReturnType<typeof loadCrashDiagnosticsState>) => void): void {
+  const state = loadCrashDiagnosticsState(dataDir);
+  mutator(state);
+  saveCrashDiagnosticsState(dataDir, state);
+}
+
+function beginCrashWatch(processName: string, gameId: string): void {
+  stopCrashWatch();
+  crashWatchTimer = setInterval(() => {
+    if (isGameProcessRunning(processName)) return;
+    stopCrashWatch();
+    try {
+      persistCrashState((state) => {
+        const record = getLaunchRecord(state, gameId);
+        if (!record || record.evidenceSealed) return;
+        sealCrashLaunch(record);
+      });
+    } catch (e) {
+      appLog(`[crash-diagnostics] watch failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, CRASH_WATCH_MS);
+}
+
+/** Freeze any unfinished previous launch, then snapshot AppData before the new process starts. */
+function prepareCrashDiagnosticsBeforeLaunch(gameId: string, appDataFolderName: string): {
+  startedAt: number;
+  userDir: string;
+  evidence: ReturnType<typeof captureEvidence>;
+} | null {
+  if (!prefsCrashDiagnosticsEnabled()) return null;
+  persistCrashState((state) => {
+    const previous = getLaunchRecord(state, gameId);
+    if (previous && !previous.evidenceSealed) {
+      sealCrashLaunch(previous);
+    }
+  });
+  const userDir = gameUserDirectory(appDataFolderName);
+  return {
+    startedAt: Date.now() / 1000,
+    userDir,
+    evidence: captureEvidence(userDir),
+  };
+}
+
+function commitCrashDiagnosticsAfterLaunch(options: {
+  gameId: string;
+  gamePath: string;
+  processName: string;
+  processIds: number[];
+  prepared: NonNullable<ReturnType<typeof prepareCrashDiagnosticsBeforeLaunch>>;
+}): void {
+  persistCrashState((state) => {
+    const record = createLaunchRecord({
+      gameId: options.gameId,
+      gamePath: options.gamePath,
+      userDir: options.prepared.userDir,
+      processName: options.processName,
+      startedAt: options.prepared.startedAt,
+      processIds: options.processIds,
+      mods: mm.getEnabledMods().map((mod) => ({
+        name: mod.name,
+        humanName: mod.humanName || undefined,
+        workshopId: mod.workshopId || undefined,
+        isInData: mod.isInData,
+      })),
+      evidence: options.prepared.evidence,
+    });
+    setLaunchRecord(state, record);
+  });
+  ensureDirCrashDiagnostics();
+  beginCrashWatch(options.processName, options.gameId);
+}
+
+function ensureDirCrashDiagnostics(): void {
+  try {
+    fs.mkdirSync(crashDiagnosticsRoot(dataDir), { recursive: true });
+    fs.mkdirSync(path.join(crashDiagnosticsRoot(dataDir), "reports"), { recursive: true });
+  } catch {
+    // ignore
+  }
 }
 
 interface GameProcessInfo {
@@ -870,7 +993,46 @@ function registerIpc() {
     return {
       isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
       isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
+      isCrashDiagnosticsEnabled: mm.config.preferences.isCrashDiagnosticsEnabled ?? false,
     };
+  });
+
+  ipcMain.handle("get-crash-diagnostics", async () => {
+    await ensureInit();
+    const game = mm.currentGame;
+    const running = game ? isGameProcessRunning(game.processName) : false;
+    let record = game ? getLaunchRecord(loadCrashDiagnosticsState(dataDir), game.id) : undefined;
+    let diagnosis = record ? diagnoseLaunch(record, running) : null;
+    if (game && record && diagnosis && !running && !record.evidenceSealed
+      && (diagnosis.crashed || diagnosis.status !== "not_started")) {
+      persistCrashState((next) => {
+        const current = getLaunchRecord(next, game.id);
+        if (current && !current.evidenceSealed) sealCrashLaunch(current);
+      });
+      record = getLaunchRecord(loadCrashDiagnosticsState(dataDir), game.id);
+      diagnosis = record ? diagnoseLaunch(record, false) : null;
+    }
+    return {
+      enabled: prefsCrashDiagnosticsEnabled(),
+      folder: crashDiagnosticsRoot(dataDir),
+      reportsFolder: path.join(crashDiagnosticsRoot(dataDir), "reports"),
+      record: record ? {
+        gameId: record.gameId,
+        startedAt: record.startedAt,
+        endedAt: record.endedAt,
+        modCount: record.mods.length,
+        evidenceSealed: !!record.evidenceSealed,
+      } : null,
+      diagnosis,
+    };
+  });
+
+  ipcMain.handle("open-crash-diagnostics-folder", async () => {
+    await ensureInit();
+    ensureDirCrashDiagnostics();
+    const folder = crashDiagnosticsRoot(dataDir);
+    const err = await shell.openPath(folder);
+    return { ok: !err, error: err || undefined, folder };
   });
 
   ipcMain.handle("get-builtin-features", async () => {
@@ -892,6 +1054,7 @@ function registerIpc() {
   ipcMain.handle("set-preferences", async (_e, patch: {
     isClosedOnPlay?: boolean;
     isSkipIntroMoviesEnabled?: boolean;
+    isCrashDiagnosticsEnabled?: boolean;
   }) => {
     await ensureInit();
     if (typeof patch.isClosedOnPlay === "boolean") {
@@ -900,6 +1063,11 @@ function registerIpc() {
     if (typeof patch.isSkipIntroMoviesEnabled === "boolean") {
       mm.config.preferences.isSkipIntroMoviesEnabled = patch.isSkipIntroMoviesEnabled;
     }
+    if (typeof patch.isCrashDiagnosticsEnabled === "boolean") {
+      mm.config.preferences.isCrashDiagnosticsEnabled = patch.isCrashDiagnosticsEnabled;
+      if (patch.isCrashDiagnosticsEnabled) ensureDirCrashDiagnostics();
+      else stopCrashWatch();
+    }
     mm.saveConfig();
     await mm.flush();
     return {
@@ -907,6 +1075,7 @@ function registerIpc() {
       preferences: {
         isClosedOnPlay: mm.config.preferences.isClosedOnPlay,
         isSkipIntroMoviesEnabled: mm.config.preferences.isSkipIntroMoviesEnabled ?? false,
+        isCrashDiagnosticsEnabled: mm.config.preferences.isCrashDiagnosticsEnabled ?? false,
       },
     };
   });
@@ -1536,6 +1705,9 @@ function registerIpc() {
         return { error: "Game is already running", errorCode: "GAME_ALREADY_RUNNING" };
       }
 
+      const crashPrepared = prepareCrashDiagnosticsBeforeLaunch(game.id, game.appDataFolderName);
+      let launchedPid: number | undefined;
+
       if (isLinux) {
         const batData = `protontricks-launch --cwd-app --appid ${game.steamId} "${gameExePath}" ${modListFileName};`;
         await new Promise<void>((resolve, reject) => {
@@ -1554,11 +1726,35 @@ function registerIpc() {
           });
           child.once("error", reject);
           child.once("spawn", () => {
+            launchedPid = child.pid;
             child.unref();
             resolve();
           });
         });
       }
+
+      if (crashPrepared) {
+        const processIds = new Set<number>();
+        if (launchedPid) processIds.add(launchedPid);
+        for (const proc of listWindowsGameProcesses(game.processName)) {
+          if (isLiveGameProcess(proc)) processIds.add(proc.pid);
+        }
+        try {
+          commitCrashDiagnosticsAfterLaunch({
+            gameId: game.id,
+            gamePath,
+            processName: game.processName,
+            processIds: [...processIds],
+            prepared: crashPrepared,
+          });
+          appLog(
+            `[crash-diagnostics] tracking launch game=${game.id} pids=${[...processIds].join(",") || "none"}`,
+          );
+        } catch (e) {
+          appLog(`[crash-diagnostics] failed to record launch: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
       console.log(`[launcher] Game launched with ${enabledMods.length} enabled mods`);
       const closeOnPlay = mm.config.preferences.isClosedOnPlay;
       if (closeOnPlay && mainWindow) {
@@ -1726,6 +1922,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  stopCrashWatch();
   stopSubscriptionSync();
   if (process.platform !== "darwin") app.quit();
 });

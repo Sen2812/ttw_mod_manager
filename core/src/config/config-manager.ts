@@ -20,6 +20,11 @@ export interface UserPreferences {
   isClosedOnPlay: boolean;
   /** Replace intro cinematics with empty stubs on launch (when supported). */
   isSkipIntroMoviesEnabled: boolean;
+  /**
+   * Snapshot CA crash dumps / modified.log around each launch and write reports
+   * under dataDir/crash-diagnostics/.
+   */
+  isCrashDiagnosticsEnabled: boolean;
   /** @deprecated Unused — campaign helpers are an external MCT mod. */
   isPlbuffInjectionEnabled: boolean;
   /** @deprecated Options live in MCT; kept for reading old config files. */
@@ -55,6 +60,7 @@ export function createDefaultConfig(currentGame: SupportedGame = "wh3"): AppConf
     preferences: {
       isClosedOnPlay: false,
       isSkipIntroMoviesEnabled: false,
+      isCrashDiagnosticsEnabled: false,
       isPlbuffInjectionEnabled: false,
       plbuffOptions: { ...DEFAULT_PLBUFF_OPTIONS },
     },

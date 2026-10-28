@@ -16,3 +16,4 @@ export * from "./preset-order";
 export * from "./local-pack-import";
 export * from "./local-import-times";
 export * from "./auto-sort";
+export * from "./crash-diagnostics";

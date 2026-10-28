@@ -38,6 +38,7 @@ export interface AppConfigResponse {
   preferences?: {
     isClosedOnPlay: boolean;
     isSkipIntroMoviesEnabled?: boolean;
+    isCrashDiagnosticsEnabled?: boolean;
   };
 }
 
@@ -184,6 +185,7 @@ declare global {
       getPreferences: () => Promise<{
         isClosedOnPlay: boolean;
         isSkipIntroMoviesEnabled: boolean;
+        isCrashDiagnosticsEnabled: boolean;
       }>;
       getBuiltinFeatures: () => Promise<{
         features: Array<{
@@ -197,13 +199,43 @@ declare global {
       setPreferences: (patch: {
         isClosedOnPlay?: boolean;
         isSkipIntroMoviesEnabled?: boolean;
+        isCrashDiagnosticsEnabled?: boolean;
       }) => Promise<{
         ok: boolean;
         preferences: {
           isClosedOnPlay: boolean;
           isSkipIntroMoviesEnabled: boolean;
+          isCrashDiagnosticsEnabled: boolean;
         };
       }>;
+      getCrashDiagnostics: () => Promise<{
+        enabled: boolean;
+        folder: string;
+        reportsFolder: string;
+        record: {
+          gameId: string;
+          startedAt: number;
+          endedAt?: number;
+          modCount: number;
+          evidenceSealed: boolean;
+        } | null;
+        diagnosis: {
+          status: string;
+          crashed: boolean;
+          noCleanExit: boolean;
+          expectedCount: number;
+          loadedCount: number;
+          pending: string[];
+          dumps: Array<{
+            name: string;
+            exception?: { code: string; address: string; access?: string; target?: string };
+            stack: string[];
+          }>;
+          shouldNotify: boolean;
+          report: string;
+        } | null;
+      }>;
+      openCrashDiagnosticsFolder: () => Promise<{ ok: boolean; error?: string; folder: string }>;
       saveUiState: (s: any) => Promise<{ ok: boolean }>;
       saveModState: (m: Mod[]) => Promise<{ ok: boolean }>;
       savePresets: (p: Preset[]) => Promise<{ ok: boolean }>;
