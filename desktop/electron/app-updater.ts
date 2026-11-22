@@ -1,5 +1,10 @@
+import { createRequire } from "node:module";
 import { app, BrowserWindow, shell } from "electron";
-import { autoUpdater, type UpdateInfo, type ProgressInfo } from "electron-updater";
+import type { AppUpdater, ProgressInfo, UpdateInfo } from "electron-updater";
+
+// electron-updater is CJS; named ESM imports crash in the packaged app.
+const require = createRequire(import.meta.url);
+const { autoUpdater } = require("electron-updater") as { autoUpdater: AppUpdater };
 
 export type AppUpdatePhase =
   | "idle"
