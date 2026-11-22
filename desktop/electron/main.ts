@@ -52,6 +52,15 @@ import {
 } from "./steam-client";
 import { getSteamClientStatus } from "./steam-status";
 import { isSteamIpcUnavailableError } from "../../core/src/mod-manager/steam-ipc-error";
+import {
+  setupAppUpdater,
+  getAppUpdateState,
+  checkForAppUpdate,
+  downloadAppUpdate,
+  installAppUpdate,
+  openAppReleasePage,
+  scheduleStartupUpdateCheck,
+} from "./app-updater";
 
 let mainWindow: BrowserWindow | null = null;
 let mm: ModManager;
@@ -1544,6 +1553,13 @@ function registerIpc() {
   });
 
   // ── 启动游戏 ─────────────────────────────────────────────────────────────
+  // ── 应用更新（GitHub Releases + electron-updater）────────────────────────
+  ipcMain.handle("get-app-update-state", () => getAppUpdateState());
+  ipcMain.handle("check-app-update", async () => checkForAppUpdate(true));
+  ipcMain.handle("download-app-update", async () => downloadAppUpdate());
+  ipcMain.handle("install-app-update", () => installAppUpdate());
+  ipcMain.handle("open-app-release-page", async () => openAppReleasePage());
+
   // ── 外部链接 / 文件夹 ──
   // 用系统默认浏览器打开 URL（工坊页面等），避免在 Electron 内部打开
   ipcMain.handle("open-url", async (_e, url: string) => {
@@ -1907,6 +1923,12 @@ app.whenReady().then(async () => {
   };
   registerIpc();
   createWindow();
+
+  setupAppUpdater({
+    getMainWindow: () => mainWindow,
+    log: (msg) => appLog(msg),
+  });
+  scheduleStartupUpdateCheck();
 
   initPromise = mm.init().then(() => {
     appLog("Mod manager initialized");

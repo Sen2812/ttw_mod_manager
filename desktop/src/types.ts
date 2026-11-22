@@ -59,6 +59,30 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
+export type AppUpdatePhase =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "ready"
+  | "error";
+
+export interface AppUpdateState {
+  phase: AppUpdatePhase;
+  currentVersion: string;
+  availableVersion?: string;
+  releaseName?: string;
+  releaseNotes?: string;
+  percent?: number;
+  bytesPerSecond?: number;
+  transferred?: number;
+  total?: number;
+  error?: string;
+  portable: boolean;
+  packaged: boolean;
+}
+
 // ─── 覆盖/冲突分析 ──
 
 export interface ConflictParticipant {
@@ -274,12 +298,18 @@ declare global {
       // External links / folders
       openUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
       openFolder: (targetPath: string) => Promise<{ ok: boolean; error?: string }>;
+      getAppUpdateState: () => Promise<AppUpdateState>;
+      checkAppUpdate: () => Promise<AppUpdateState>;
+      downloadAppUpdate: () => Promise<AppUpdateState>;
+      installAppUpdate: () => Promise<{ ok: boolean; error?: string }>;
+      openAppReleasePage: () => Promise<{ ok: boolean; error?: string }>;
       // 关闭确认
       onConfirmClose: (callback: () => void) => (() => void) | void;
       closeDecision: (choice: "save" | "discard" | "cancel") => void;
       onModsUpdated: (callback: (payload: ModsUpdatedPayload) => void) => (() => void) | void;
       onPrerequisitesCheckStarted?: (callback: (modName: string) => void) => (() => void) | void;
       onPrerequisitesCheckDone?: (callback: (modName: string) => void) => (() => void) | void;
+      onAppUpdateStatus?: (callback: (payload: AppUpdateState) => void) => (() => void) | void;
       minimize?: () => void;
       maximize?: () => void;
       close?: () => void;

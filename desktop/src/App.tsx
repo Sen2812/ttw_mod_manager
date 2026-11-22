@@ -11,6 +11,7 @@ import CompatPanel from "./components/CompatPanel";
 import ModDependencyModal from "./components/ModDependencyModal";
 import ModUpdateModal from "./components/ModUpdateModal";
 import ConfirmDialog from "./components/ConfirmDialog";
+import AppUpdateDialog from "./components/AppUpdateDialog";
 import type { BootstrapResponse, Mod, ModsUpdatedPayload } from "./types";
 
 function applyModsPayload(
@@ -130,6 +131,7 @@ function AppShell() {
       <CompatPanel />
       <ModDependencyModal />
       <ModUpdateModal />
+      <AppUpdateDialog />
 
       <ConfirmDialog
         open={showCloseConfirm}

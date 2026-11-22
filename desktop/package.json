@@ -1,6 +1,6 @@
 {
   "name": "mod-manager-desktop",
-  "version": "0.1.0",
+  "version": "0.7.0",
   "description": "Total War Mod Manager — Desktop GUI",
   "author": "Sen2812",
   "type": "module",
@@ -27,6 +27,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@tanstack/react-virtual": "^3.14.6",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.11",
     "lucide-react": "^0.513.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -51,6 +52,13 @@
     "productName": "TTW Mod Manager",
     "copyright": "Copyright © Sen2812",
     "icon": "build/icon.png",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Sen2812",
+        "repo": "ttw_mod_manager"
+      }
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"

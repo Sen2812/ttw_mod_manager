@@ -25,7 +25,7 @@ function copyElectronAssets(): void {
 
 const electronBuild = {
   outDir: "dist-electron",
-  rolldownOptions: { external: ["electron"] },
+  rolldownOptions: { external: ["electron", "electron-updater"] },
 };
 
 export default defineConfig({

@@ -56,6 +56,11 @@ const api = {
   forceUpdateAllOutdated: () => ipcRenderer.invoke("force-update-all-outdated"),
   openUrl: (url) => ipcRenderer.invoke("open-url", url),
   openFolder: (targetPath) => ipcRenderer.invoke("open-folder", targetPath),
+  getAppUpdateState: () => ipcRenderer.invoke("get-app-update-state"),
+  checkAppUpdate: () => ipcRenderer.invoke("check-app-update"),
+  downloadAppUpdate: () => ipcRenderer.invoke("download-app-update"),
+  installAppUpdate: () => ipcRenderer.invoke("install-app-update"),
+  openAppReleasePage: () => ipcRenderer.invoke("open-app-release-page"),
   onConfirmClose: (callback) => subscribe("confirm-close", callback),
   closeDecision: (choice) => {
     ipcRenderer.send("close-decision", choice);
@@ -63,6 +68,7 @@ const api = {
   onModsUpdated: (callback) => subscribe("mods-updated", callback, (payload) => payload),
   onPrerequisitesCheckStarted: (callback) => subscribe("prerequisites-check-started", callback, (modName) => modName),
   onPrerequisitesCheckDone: (callback) => subscribe("prerequisites-check-done", callback, (modName) => modName),
+  onAppUpdateStatus: (callback) => subscribe("app-update-status", callback, (payload) => payload),
 };
 
 contextBridge.exposeInMainWorld("api", api);

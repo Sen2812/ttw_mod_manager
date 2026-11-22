@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { useStore } from "../store";
-import { useT, useI18nStore } from "../i18n";
+import { useT } from "../i18n";
 import { LanguageToggle } from "./LanguageToggle";
-import { X, FolderOpen, Copy, Check, RefreshCw, Gamepad2 } from "lucide-react";
+import { X, FolderOpen, Copy, Check, RefreshCw, Gamepad2, Download } from "lucide-react";
+import ConfirmDialog from "./ConfirmDialog";
 
-import type { BootstrapResponse } from "../types";
+import type { AppUpdateState, BootstrapResponse } from "../types";
 
 function formatPath(base: string, ...parts: string[]): string {
   const sep = base.includes("\\") ? "\\" : "/";
@@ -21,6 +22,10 @@ export default function SettingsPage() {
   const [isChangingDir, setIsChangingDir] = useState(false);
   const [closeOnPlay, setCloseOnPlay] = useState(false);
   const [isSavingPreference, setIsSavingPreference] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateFeedback, setUpdateFeedback] = useState<"up-to-date" | "dev-mode" | "error" | null>(null);
+  const [updateError, setUpdateError] = useState("");
 
   useEffect(() => {
     if (showSettingsPage) loadPaths();
@@ -34,8 +39,35 @@ export default function SettingsPage() {
       setConfigPath(formatPath(dir, "mod-manager-config.json"));
       const prefs = await window.api.getPreferences();
       setCloseOnPlay(prefs.isClosedOnPlay);
+      const updateState = await window.api.getAppUpdateState();
+      setAppVersion(updateState.currentVersion);
     } catch (e) {
       console.error("Failed to load paths:", e);
+    }
+  };
+
+  const handleCheckAppUpdate = async () => {
+    setUpdateChecking(true);
+    setUpdateFeedback(null);
+    setUpdateError("");
+    try {
+      const result: AppUpdateState = await window.api.checkAppUpdate();
+      setAppVersion(result.currentVersion);
+      if (result.phase === "not-available") setUpdateFeedback("up-to-date");
+      else if (result.phase === "error") {
+        if (result.error === "dev-mode") setUpdateFeedback("dev-mode");
+        else {
+          setUpdateFeedback("error");
+          setUpdateError(result.error ?? "");
+        }
+      }
+      // available / downloading / ready → AppUpdateDialog handles prompts
+    } catch (e) {
+      console.error("Failed to check app update:", e);
+      setUpdateFeedback("error");
+      setUpdateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUpdateChecking(false);
     }
   };
 
@@ -119,6 +151,35 @@ export default function SettingsPage() {
             <p className="section-desc">{t("settings.languageDesc")}</p>
             <div className="surface-muted p-4">
               <LanguageToggle />
+            </div>
+          </div>
+
+          {/* App Update Section */}
+          <div>
+            <h3 className="section-title">{t("settings.appUpdate")}</h3>
+            <p className="section-desc">{t("settings.appUpdateDesc")}</p>
+            <div className="surface-muted p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-morandi-text">
+                    {t("settings.appVersion", { version: appVersion || "—" })}
+                  </p>
+                  <p className="text-xs text-morandi-text-secondary mt-1 leading-relaxed">
+                    {t("settings.appUpdateHint")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCheckAppUpdate}
+                  disabled={updateChecking}
+                  className="btn-morandi-ghost !text-xs shrink-0"
+                >
+                  {updateChecking
+                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    : <Download className="w-3.5 h-3.5" />}
+                  <span>{t("settings.checkAppUpdate")}</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -227,6 +288,37 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={updateFeedback === "up-to-date"}
+        title={t("appUpdate.upToDateTitle")}
+        message={t("appUpdate.upToDateMsg", { version: appVersion || "—" })}
+        confirmText={t("common.gotIt")}
+        cancelText={t("common.close")}
+        variant="primary"
+        onConfirm={() => setUpdateFeedback(null)}
+        onCancel={() => setUpdateFeedback(null)}
+      />
+      <ConfirmDialog
+        open={updateFeedback === "dev-mode"}
+        title={t("appUpdate.devModeTitle")}
+        message={t("appUpdate.devModeMsg")}
+        confirmText={t("common.gotIt")}
+        cancelText={t("common.close")}
+        variant="primary"
+        onConfirm={() => setUpdateFeedback(null)}
+        onCancel={() => setUpdateFeedback(null)}
+      />
+      <ConfirmDialog
+        open={updateFeedback === "error"}
+        title={t("appUpdate.errorTitle")}
+        message={t("appUpdate.errorMsg", { error: updateError || "—" })}
+        confirmText={t("common.gotIt")}
+        cancelText={t("common.close")}
+        variant="warning"
+        onConfirm={() => setUpdateFeedback(null)}
+        onCancel={() => setUpdateFeedback(null)}
+      />
     </div>
   );
 }
